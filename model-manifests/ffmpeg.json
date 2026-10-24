@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "target_version": "9.0.2",
+  "description": "書き出し（カット動画の結合）と、mp4からの最終フレーム抽出に使うffmpeg。公式プロジェクトはWindowsバイナリを配布していないため、GyanDのWindowsビルドを版タグで固定して取得する。SHA256とサイズはGitHubリリースAPIの公開値。BtbNのビルドは autobuild-<日時> タグしか無く、約10日で古いものが消えるため、固定した取得先が必ず失効する（実際に404になった）。版で固定できる配布元を選ぶ。結合は libx264 でH.264へ再エンコードするため、x264を含むGPL構成のビルドが要る（LGPL構成にはlibx264が入らない）。静的ビルドを選ぶのは、実行ファイル単体で完結しDLLの置き場所に左右されないため。essentials構成で gpl・libx264・static を満たす（full構成は251MBあり、この用途には要らないものが増えるだけ）。アプリはこれを別プロセスとして呼ぶだけで、同梱・再配布はしない。",
+  "components": [
+    {
+      "id": "ffmpeg_windows_gpl",
+      "display_name_ja": "動画をつなぐための処理エンジン（ffmpeg）",
+      "download_url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+      "destination": "download/ffmpeg-9.0.2-win64-gpl.zip",
+      "size_bytes": 114768076,
+      "sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+      "license": "GPL-3.0",
+      "source": "https://github.com/GyanD/codexffmpeg"
+    }
+  ]
+}

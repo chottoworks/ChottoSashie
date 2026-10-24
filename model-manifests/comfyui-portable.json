@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "target_version": "v0.42.1",
+  "description": "専用環境モードでアプリが用意するComfyUI本体。公式Windowsポータブル(NVIDIA、Python・torch同梱)。SHA256とサイズはGitHubリリースAPIの公開値。MiniMax H3 のノードを含むため v0.33.1 以上が要る。v0.39.0 からは有料APIノードを止めるオプションが --disable-partner-nodes に分かれ、--disable-api-nodes は --offline の別名になった（起動時は版を見て渡し分ける）。",
+  "components": [
+    {
+      "id": "comfyui_windows_portable_nvidia",
+      "display_name_ja": "ComfyUI Windows ポータブル（NVIDIA、Python同梱）",
+      "download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.42.1/ComfyUI_windows_portable_nvidia.7z",
+      "destination": "download/ComfyUI_windows_portable_nvidia.7z",
+      "size_bytes": 2018444114,
+      "sha256": "496afd18790ec685d99ebba2edf200d7371a29fbdd3a992bb0f4f52f244a6874",
+      "license": "GPL-3.0",
+      "source": "https://github.com/comfyanonymous/ComfyUI"
+    }
+  ]
+}

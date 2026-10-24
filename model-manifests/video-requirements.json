@@ -1,0 +1,302 @@
+{
+  "format_version": 1,
+  "description": "ちょっと挿絵の各機能が要求する ComfyUI ノード・モデルファイルと、この端末に要る道具。ノードとモデルは実ComfyUIの object_info と突き合わせて確認する。tools は ComfyUI の外で動くもので、確認と用意はアプリ側が受け持つ。optional=true の機能は任意なので、不足していても全体の判定は「揃っている」のままにする。",
+  "capabilities": [
+    {
+      "id": "asset_generation",
+      "display_name_ja": "背景・小物の生成（Z-Image Turbo）",
+      "nodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "CLIPTextEncode",
+        "EmptySD3LatentImage",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "models": [
+        {
+          "file": "z_image_turbo_bf16.safetensors",
+          "display_name_ja": "Z-Image-Turbo 生成モデル",
+          "loader": "UNETLoader",
+          "input": "unet_name"
+        },
+        {
+          "file": "qwen_3_4b.safetensors",
+          "display_name_ja": "Qwen 3 4B テキストエンコーダー",
+          "loader": "CLIPLoader",
+          "input": "clip_name"
+        },
+        {
+          "file": "ae.safetensors",
+          "display_name_ja": "画像デコーダー（VAE）",
+          "loader": "VAELoader",
+          "input": "vae_name"
+        }
+      ]
+    },
+    {
+      "id": "composition",
+      "display_name_ja": "静止画の合成（立ち絵と背景の合成）",
+      "nodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "LoraLoaderModelOnly",
+        "ModelSamplingAuraFlow",
+        "CFGNorm",
+        "FluxKontextImageScale",
+        "TextEncodeQwenImageEditPlus",
+        "FluxKontextMultiReferenceLatentMethod",
+        "EmptySD3LatentImage",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "models": [
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "qwen_image_edit_2511_fp8mixed.safetensors",
+          "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (fp8mixed)"
+        },
+        {
+          "loader": "CLIPLoader",
+          "input": "clip_name",
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "display_name_ja": "Qwen2.5-VL テキストエンコーダー"
+        },
+        {
+          "loader": "VAELoader",
+          "input": "vae_name",
+          "file": "qwen_image_vae.safetensors",
+          "display_name_ja": "Qwen-Image VAE"
+        },
+        {
+          "loader": "LoraLoaderModelOnly",
+          "input": "lora_name",
+          "file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "display_name_ja": "Qwen-Image-Edit-2511 Lightning LoRA（4ステップ高速化）"
+        }
+      ]
+    },
+    {
+      "id": "i2v",
+      "display_name_ja": "カットの動画生成（Wan 2.2 Image-to-Video）",
+      "nodes": [
+        "UNETLoader",
+        "LoraLoaderModelOnly",
+        "ModelSamplingSD3",
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "CLIPTextEncode",
+        "WanImageToVideo",
+        "KSamplerAdvanced",
+        "VAEDecode",
+        "SaveAnimatedWEBP"
+      ],
+      "models": [
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "display_name_ja": "Wan 2.2 I2V 高ノイズエキスパート（14B, fp8）"
+        },
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "display_name_ja": "Wan 2.2 I2V 低ノイズエキスパート（14B, fp8）"
+        },
+        {
+          "loader": "CLIPLoader",
+          "input": "clip_name",
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "display_name_ja": "UMT5-XXL テキストエンコーダー"
+        },
+        {
+          "loader": "VAELoader",
+          "input": "vae_name",
+          "file": "wan_2.1_vae.safetensors",
+          "display_name_ja": "Wan 2.1 VAE"
+        },
+        {
+          "loader": "LoraLoaderModelOnly",
+          "input": "lora_name",
+          "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+          "display_name_ja": "Wan 2.2 I2V Lightning LoRA 高ノイズ（4ステップ）"
+        },
+        {
+          "loader": "LoraLoaderModelOnly",
+          "input": "lora_name",
+          "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+          "display_name_ja": "Wan 2.2 I2V Lightning LoRA 低ノイズ（4ステップ）"
+        }
+      ],
+      "video_only": true
+    },
+    {
+      "id": "i2v_minimax_h3",
+      "display_name_ja": "カットの動画生成（MiniMax H3・音声付き / 任意）",
+      "optional": true,
+      "nodes": [
+        "UNETLoader",
+        "LoraLoaderModelOnly",
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "MiniMaxH3ImageToVideo",
+        "RandomNoise",
+        "KSamplerSelect",
+        "BasicScheduler",
+        "BasicGuider",
+        "SamplerCustomAdvanced",
+        "VAEDecode",
+        "VAEDecodeAudio",
+        "CreateVideo",
+        "SaveVideo"
+      ],
+      "models": [
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+          "display_name_ja": "MiniMax H3 動画生成モデル（fl2va, int8）"
+        },
+        {
+          "loader": "CLIPLoader",
+          "input": "clip_name",
+          "file": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+          "display_name_ja": "MiniMax H3 テキストエンコーダー（Qwen3-VL 32B, nvfp4）"
+        },
+        {
+          "loader": "VAELoader",
+          "input": "vae_name",
+          "file": "minimax_h3_video_vae_fp16.safetensors",
+          "display_name_ja": "MiniMax H3 映像VAE"
+        },
+        {
+          "loader": "VAELoader",
+          "input": "vae_name",
+          "file": "minimax_h3_audio_vae_fp32.safetensors",
+          "display_name_ja": "MiniMax H3 音声VAE"
+        },
+        {
+          "loader": "LoraLoaderModelOnly",
+          "input": "lora_name",
+          "file": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+          "display_name_ja": "MiniMax H3 高速化LoRA（8ステップ）"
+        }
+      ],
+      "video_only": true
+    },
+    {
+      "id": "character_figure",
+      "display_name_ja": "立ち絵の作成（人物候補・全身の1枚）",
+      "nodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "LoadImage",
+        "LoraLoaderModelOnly",
+        "ModelSamplingAuraFlow",
+        "CFGNorm",
+        "FluxKontextImageScale",
+        "TextEncodeQwenImageEditPlus",
+        "FluxKontextMultiReferenceLatentMethod",
+        "CLIPTextEncode",
+        "EmptySD3LatentImage",
+        "VAEEncode",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "models": [
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "z_image_turbo_bf16.safetensors",
+          "display_name_ja": "Z-Image-Turbo 拡散モデル（人物候補の生成に使用）"
+        },
+        {
+          "loader": "CLIPLoader",
+          "input": "clip_name",
+          "file": "qwen_3_4b.safetensors",
+          "display_name_ja": "Qwen3-4B テキストエンコーダー（人物候補の生成に使用）"
+        },
+        {
+          "loader": "VAELoader",
+          "input": "vae_name",
+          "file": "ae.safetensors",
+          "display_name_ja": "Z-Image VAE（人物候補の生成に使用）"
+        },
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "qwen_image_edit_2511_fp8mixed.safetensors",
+          "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (fp8mixed)（立ち絵の生成に使用）"
+        },
+        {
+          "loader": "CLIPLoader",
+          "input": "clip_name",
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "display_name_ja": "Qwen2.5-VL テキストエンコーダー（立ち絵の生成に使用）"
+        },
+        {
+          "loader": "VAELoader",
+          "input": "vae_name",
+          "file": "qwen_image_vae.safetensors",
+          "display_name_ja": "Qwen-Image VAE（立ち絵の生成に使用）"
+        },
+        {
+          "loader": "LoraLoaderModelOnly",
+          "input": "lora_name",
+          "file": "qwen-image-edit-2511-multiple-angles-lora.safetensors",
+          "display_name_ja": "カメラ角度LoRA（立ち絵を正面全身へ組み直す）"
+        },
+        {
+          "loader": "LoraLoaderModelOnly",
+          "input": "lora_name",
+          "file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+          "display_name_ja": "Qwen-Image-Edit-2511 Lightning LoRA（4ステップ高速化）"
+        }
+      ]
+    },
+    {
+      "id": "prompt_translation",
+      "display_name_ja": "指示文の日本語→英語変換（MiniMax H3 用）",
+      "optional": true,
+      "notes_ja": "セリフ以外の指示を英語へ直してから動画生成へ渡す。動きの指示とセリフの両方が日本語だと、MiniMax H3 は区別できず説明文まで読み上げる。無い場合は日本語のまま送られるため、全体の判定は「揃っている」のままにする（optional）。",
+      "nodes": [
+        "CLIPLoader",
+        "TextGenerate",
+        "PreviewAny"
+      ],
+      "models": [
+        {
+          "loader": "CLIPLoader",
+          "input": "clip_name",
+          "file": "gemma4_e4b_it_fp8_scaled.safetensors",
+          "display_name_ja": "Gemma 4 E4B テキストエンコーダー（文の生成に使う）"
+        }
+      ]
+    },
+    {
+      "id": "export",
+      "display_name_ja": "動画の書き出し（全カットを1本につなぐ / 任意）",
+      "video_only": true,
+      "nodes": [],
+      "models": [],
+      "tools": [
+        {
+          "id": "ffmpeg",
+          "display_name_ja": "ffmpeg（動画をつなぐ処理エンジン）"
+        }
+      ],
+      "optional": true
+    }
+  ]
+}

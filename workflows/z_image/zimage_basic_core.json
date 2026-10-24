@@ -1,0 +1,85 @@
+{
+  "_chotto_sashie_bindings": {
+    "prompt": { "node": "4", "input": "text" },
+    "negative_prompt": { "node": "5", "input": "text" },
+    "seed": { "node": "7", "input": "seed" },
+    "width": { "node": "6", "input": "width" },
+    "height": { "node": "6", "input": "height" },
+    "diffusion_model": { "node": "1", "input": "unet_name" },
+    "text_encoder": { "node": "2", "input": "clip_name" },
+    "vae": { "node": "3", "input": "vae_name" },
+    "filename_prefix": { "node": "9", "input": "filename_prefix" }
+  },
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": { "title": "Z-Image-Turbo" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "_meta": { "title": "テキストエンコーダー" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "ae.safetensors" },
+    "_meta": { "title": "VAE" }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "a book illustration",
+      "clip": ["2", 0]
+    },
+    "_meta": { "title": "プロンプト" }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "",
+      "clip": ["2", 0]
+    },
+    "_meta": { "title": "ネガティブプロンプト" }
+  },
+  "6": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": { "width": 1024, "height": 1024, "batch_size": 1 },
+    "_meta": { "title": "画像サイズ" }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 42,
+      "steps": 9,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": ["1", 0],
+      "positive": ["4", 0],
+      "negative": ["5", 0],
+      "latent_image": ["6", 0]
+    },
+    "_meta": { "title": "Turbo生成" }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["7", 0], "vae": ["3", 0] },
+    "_meta": { "title": "画像へ変換" }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "ChottoSashie/turbo",
+      "images": ["8", 0]
+    },
+    "_meta": { "title": "保存" }
+  }
+}

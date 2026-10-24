@@ -1,0 +1,36 @@
+[package]
+name = "chotto-sashie-desktop"
+version = "0.1.0"
+description = "物語の挿絵と、その先の数秒を。ぜんぶ、このPCの中だけで。"
+authors = ["Chotto Works"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "chotto_sashie_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.5", features = [] }
+# 保存先をOSのダイアログで選ばせるために使う。ブラウザの保存先選択は、
+# 「このサイトにファイルの編集を許可するか」という警告が必ず付いてくる。
+tauri-plugin-dialog = "=2.7.2"
+uuid = { version = "=1.24.0", features = ["v4"] }
+# 保存先の設定ファイルと、移行処理の応答を読み書きするため。
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+
+[target.'cfg(windows)'.dependencies]
+# 親が消えたら子も道連れにするジョブオブジェクトのため。強制終了されたときに
+# APIのPythonが残るのを、OSの仕組みで防ぐ。
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_System_JobObjects",
+  # CreateJobObjectW の引数（SECURITY_ATTRIBUTES）に要る。
+  "Win32_Security",
+  # JOBOBJECT_EXTENDED_LIMIT_INFORMATION の中身（IO_COUNTERS）に要る。
+  "Win32_System_Threading",
+] }

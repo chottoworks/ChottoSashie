@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chotto-sashie"
+version = "0.1.0"
+description = "挿絵と動画を1つの流れで作るローカルアプリのAPI"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "fastapi==0.115.12",
+  "httpx==0.28.1",
+  "pillow==11.3.0",
+  "py7zr==1.1.3",
+  "pydantic==2.11.7",
+  "pydantic-settings==2.10.1",
+  "python-multipart==0.0.20",
+  "uvicorn[standard]==0.34.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.1",
+  "pytest-cov==6.2.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "services/shared/src/chotto_sashie_shared",
+  "services/api/src/chotto_sashie_api",
+]
+# 手元で動かした痕跡（別のPython版向けの .pyc）を配らない。作業ツリーに何が
+# 残っていても、出来上がるものが変わらないようにする。
+exclude = ["**/__pycache__", "**/*.py[cod]"]
+
+# アプリに付いてくる読み取り専用のファイルを、パッケージの隣へ入れる。
+# ここに入れないと、リポジトリの外へインストールした時点でワークフローも
+# マニフェストも同梱物も見つからず、起動はするのに生成だけが失敗する。
+# 置き場所の決め方は chotto_sashie_shared.shared_env.app_resources_root にある。
+[tool.hatch.build.targets.wheel.force-include]
+"workflows" = "chotto_sashie_shared/_resources/workflows"
+"model-manifests" = "chotto_sashie_shared/_resources/model-manifests"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = [
+  "services/shared/src",
+  "services/api/src",
+]
+markers = [
+  "slow: 実プロセス起動・停止または実時間の応答待ちを伴う最終確認用テスト",
+]
+
+[tool.coverage.run]
+source = ["chotto_sashie_shared", "chotto_sashie_api"]
+

@@ -1,0 +1,161 @@
+{
+  "_chotto_sashie_bindings": {
+    "prompt": { "node": "8", "input": "text" },
+    "negative_prompt": { "node": "9", "input": "text" },
+    "seed_high": { "node": "11", "input": "noise_seed" },
+    "seed_low": { "node": "12", "input": "noise_seed" },
+    "width": { "node": "10", "input": "width" },
+    "height": { "node": "10", "input": "height" },
+    "length": { "node": "10", "input": "length" },
+    "fps": { "node": "14", "input": "fps" },
+    "start_image": { "node": "7", "input": "image" },
+    "diffusion_model_high": { "node": "1", "input": "unet_name" },
+    "diffusion_model_low": { "node": "3", "input": "unet_name" },
+    "lightning_lora_high": { "node": "15", "input": "lora_name" },
+    "lightning_lora_low": { "node": "16", "input": "lora_name" },
+    "text_encoder": { "node": "5", "input": "clip_name" },
+    "vae": { "node": "6", "input": "vae_name" },
+    "filename_prefix": { "node": "14", "input": "filename_prefix" },
+    "last_frame_prefix": { "node": "21", "input": "filename_prefix" }
+  },
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "15": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "2": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": { "model": ["15", 0], "shift": 8.0 }
+  },
+  "3": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "16": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": ["3", 0],
+      "lora_name": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+      "strength_model": 1.0
+    }
+  },
+  "4": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": { "model": ["16", 0], "shift": 8.0 }
+  },
+  "5": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    }
+  },
+  "6": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "wan_2.1_vae.safetensors" }
+  },
+  "7": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "start-frame.png" }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["5", 0], "text": "the scene comes to life with gentle natural motion" }
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["5", 0],
+      "text": "static, still, frozen, jitter, flicker, distortion, warping, extra limbs, low quality"
+    }
+  },
+  "10": {
+    "class_type": "WanImageToVideo",
+    "inputs": {
+      "positive": ["8", 0],
+      "negative": ["9", 0],
+      "vae": ["6", 0],
+      "start_image": ["7", 0],
+      "width": 1280,
+      "height": 720,
+      "length": 81,
+      "batch_size": 1
+    }
+  },
+  "11": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": 42,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 2,
+      "return_with_leftover_noise": "enable",
+      "model": ["2", 0],
+      "positive": ["10", 0],
+      "negative": ["10", 1],
+      "latent_image": ["10", 2]
+    }
+  },
+  "12": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": 42,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 2,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
+      "model": ["4", 0],
+      "positive": ["10", 0],
+      "negative": ["10", 1],
+      "latent_image": ["11", 0]
+    }
+  },
+  "13": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["12", 0], "vae": ["6", 0] }
+  },
+  "14": {
+    "class_type": "SaveAnimatedWEBP",
+    "inputs": {
+      "images": ["13", 0],
+      "filename_prefix": "VideoStory/shots/shot",
+      "fps": 16.0,
+      "lossless": false,
+      "quality": 85,
+      "method": "default"
+    }
+  },
+  "20": {
+    "class_type": "ImageFromBatch",
+    "inputs": { "image": ["13", 0], "batch_index": -1, "length": 1 }
+  },
+  "21": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["20", 0],
+      "filename_prefix": "VideoStory/shot-last-frames/shot"
+    }
+  }
+}

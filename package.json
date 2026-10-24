@@ -1,0 +1,13 @@
+{
+  "name": "chotto-sashie",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev": "pnpm --filter @chotto-sashie/web dev",
+    "build": "pnpm --filter @chotto-sashie/web build",
+    "test": "pnpm --filter @chotto-sashie/web test",
+    "tauri": "pnpm --filter @chotto-sashie/desktop tauri"
+  },
+  "license": "MIT"
+}

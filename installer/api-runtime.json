@@ -1,0 +1,23 @@
+{
+  "format_version": 1,
+  "description": "配布版のアプリに同梱する、API用のPythonランタイム。公式のWindows埋め込み可能パッケージ（embeddable）を版で固定して使う。中身は普通のファイルなので、利用者の環境で不具合が出たときにそのまま追える。組み立ては installer/build_api_runtime.py が行い、ここに書いた版とSHA256に一致しないものは使わない。",
+  "python": {
+    "version": "3.13.15",
+    "download_url": "https://www.python.org/ftp/python/3.13.15/python-3.13.15-embed-amd64.zip",
+    "sha256": "d1f04d990aee1253d8569e8e5104e30fa9f5fa830899f14843448872d936a2cf",
+    "size_bytes": 11009825,
+    "license": "PSF-2.0",
+    "source": "https://www.python.org/downloads/windows/",
+    "note_ja": "3.12系は2025年4月からセキュリティ修正のみになり、Windows向けのバイナリが出ていないため使えない。専用ComfyUI同梱のPythonも3.13系で、学習側と版の考え方が揃う。sha256 と size_bytes が空のときは、まだ実物と突き合わせていない。`python installer/build_api_runtime.py --pin` で実測値を記録する。"
+  },
+  "wheels": {
+    "platform": "win_amd64",
+    "python_version": "3.13",
+    "note_ja": "依存の版は pyproject.toml が唯一の出どころ。ここでは取得する対象の環境だけを決める。ソースからの組み立ては行わず、win_amd64 用の出来合いのものだけを使う（利用者の環境にコンパイラを要求しないため）。"
+  },
+  "layout": {
+    "runtime_dir": "api-runtime",
+    "resources_dir": "app",
+    "note_ja": "同梱物（workflows・model-manifests）は、site-packagesの奥に置くとWindowsの260文字制限に近づくため、resources_dir へ出して CHOTTO_SASHIE_RESOURCES_DIR で指す。"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "_chotto_sashie_bindings": {
+    "prompt": { "node": "2", "input": "prompt" },
+    "max_length": { "node": "2", "input": "max_length" },
+    "clip_name": { "node": "1", "input": "clip_name" },
+    "clip_type": { "node": "1", "input": "type" }
+  },
+  "1": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "gemma4_e4b_it_fp8_scaled.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    }
+  },
+  "2": {
+    "class_type": "TextGenerate",
+    "inputs": {
+      "clip": ["1", 0],
+      "prompt": "",
+      "max_length": 96,
+      "sampling_mode": "off",
+      "thinking": false,
+      "use_default_template": true
+    }
+  },
+  "3": {
+    "class_type": "PreviewAny",
+    "inputs": { "source": ["2", 0] }
+  }
+}

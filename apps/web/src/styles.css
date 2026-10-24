@@ -1,0 +1,526 @@
+:root {
+  color: #252521;
+  background: #f2eee6;
+  font-family: "Yu Gothic UI", "Meiryo UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; min-width: 0; min-height: 100vh; }
+button, input, textarea, select { font: inherit; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #d16a4b; outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}
+/* --- ちょっと挿絵の固有レイアウト --- */
+.vs-shell { max-width: 1080px; margin: 0 auto; padding: 28px 24px 64px; }
+.vs-head { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #d2cabd; padding-bottom: 16px; margin-bottom: 22px; flex-wrap: wrap; gap: 12px; }
+.vs-head h1 { font-size: 26px; margin: 0; }
+.vs-tagline { margin: 6px 0 0; color: #6a655d; font-size: 13px; }
+.vs-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 24px; }
+.vs-tab { padding: 8px 15px; border: 1px solid #cfc6b8; background: #fbf8f2; color: #4a463f; cursor: pointer; border-radius: 6px; font-size: 13px; }
+.vs-tab.active { background: #2e3934; color: #fbf6ec; border-color: #2e3934; }
+/* 素材作成のタブ。下へ送っても見えるよう、画面の上に留める（背景を塗って下の内容を隠す）。 */
+.vs-sticky-tabs { position: sticky; top: 0; z-index: 20; margin: 0 0 16px; padding: 10px 0; background: #f2eee6; border-bottom: 1px solid #d2cabd; }
+/* 画面を移ったときの送り先。上に留めたタブの下へ来るよう、その分だけ空ける。 */
+.vs-character-screen, .vs-character-list, .vs-asset-screen { scroll-margin-top: 64px; }
+.vs-card { border: 1px solid #d8d0c2; background: #fffdf8; border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+.vs-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.vs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.vs-field { display: grid; gap: 5px; margin-bottom: 12px; }
+.vs-field label { font-size: 12px; color: #6a655d; letter-spacing: .02em; }
+.vs-input, .vs-textarea, .vs-select { padding: 9px 11px; border: 1px solid #c8bfb0; border-radius: 6px; background: #fff; width: 100%; }
+.vs-textarea { min-height: 64px; resize: vertical; }
+.vs-btn { padding: 9px 16px; border: 1px solid #2e3934; background: #2e3934; color: #fbf6ec; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.vs-btn.ghost { background: transparent; color: #2e3934; }
+/* 使えないボタンは薄い灰色で「押せない」ことをはっきり見せる。 */
+.vs-btn:disabled { background: #cdc7bc; border-color: #cdc7bc; color: #7d786f; opacity: 1; cursor: not-allowed; }
+.vs-btn.ghost:disabled { background: transparent; border-color: #d8d1c4; color: #a49d93; }
+/* 押してある状態の切り替え（「既定」など）。押せないのは選び済みだからで、使えないのではない。 */
+.vs-btn[aria-pressed="true"]:disabled { background: #2e3934; border-color: #2e3934; color: #fbf6ec; cursor: default; }
+.vs-btn.danger { border-color: #9b4f3d; background: transparent; color: #9b4f3d; }
+.vs-thumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; border-radius: 7px; border: 1px solid #ddd5c7; background: #efe9df; }
+/* 人物の一覧に出す代表写真。全身像が入っても顔が切れないよう、正方形で上寄りに切る。 */
+.vs-thumb.face { aspect-ratio: 1/1; object-position: 50% 12%; }
+.vs-muted { color: #837d73; font-size: 12px; }
+.vs-error { color: #9b3d2c; background: #f6e6df; border: 1px solid #e2b8a8; padding: 9px 12px; border-radius: 7px; margin-bottom: 14px; font-size: 13px; }
+.vs-ok { color: #3f6b46; font-size: 12px; }
+.vs-warn { color: #9b6a2c; font-size: 12px; }
+.vs-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; border: 1px solid #cbc2b3; color: #5c574f; }
+.vs-pill.model { border-color: #2b6cb0; color: #2b6cb0; }
+.vs-progress { height: 8px; background: #e7e0d3; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+.vs-progress > div { height: 100%; background: #5d8a67; }
+.vs-list-item { border: 1px solid #ddd5c7; border-radius: 8px; padding: 12px 14px; background: #fffdf8; }
+
+/* --- セットアップ画面（段階表示・トグル・不足への対処） --- */
+.vs-step-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.vs-step-head h2 { margin: 0; font-size: 19px; }
+.vs-step-no { display: inline-block; margin-right: 10px; color: #c45c3e; font: 700 11px Georgia, serif; letter-spacing: .14em; vertical-align: 2px; }
+.vs-status { display: inline-block; padding: 3px 11px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.vs-status.ok { border-color: #b9d4bd; background: #e4efe5; color: #3f6b46; }
+.vs-status.warn { border-color: #e3c9a6; background: #f8eedf; color: #8b5a22; }
+.vs-status.idle { border-color: #d9d1c3; background: #eee9df; color: #77716a; }
+
+
+.vs-shared-summary { display: grid; gap: 5px; margin-top: 13px; border-radius: 8px; background: #f3f6f2; padding: 12px 14px; font-size: 12px; color: #4e5a52; }
+.vs-shared-summary b { display: inline-block; min-width: 88px; color: #7d8a81; font-weight: 700; }
+.vs-note { margin-top: 12px; border-left: 3px solid #9db1a1; border-radius: 0 7px 7px 0; background: #f1f6f1; padding: 10px 13px; color: #46604f; font-size: 12px; line-height: 1.7; }
+.vs-note.warn { border-left-color: #c9a06a; background: #faf3e8; color: #7c5f34; }
+.vs-note strong { display: block; }
+
+.vs-collapse { margin-top: 12px; border: 1px solid #e2dacd; border-radius: 8px; background: #fffdf8; padding: 10px 13px; }
+.vs-collapse > summary { cursor: pointer; color: #5c574f; font-size: 12px; font-weight: 700; }
+.vs-collapse[open] > summary { margin-bottom: 8px; }
+
+.vs-capabilities, .vs-substeps { display: grid; gap: 10px; margin-top: 14px; }
+.vs-substep { border: 1px solid #ddd5c7; border-radius: 8px; background: #fbf8f2; }
+.vs-substep.done { border-color: #cfdccf; background: #f5f8f3; }
+.vs-substep > summary { display: flex; align-items: center; gap: 10px; padding: 11px 13px; cursor: pointer; list-style: none; }
+.vs-substep > summary::-webkit-details-marker { display: none; }
+.vs-substep > summary strong { flex: 1; font-size: 13px; }
+.vs-substep-index { flex: none; display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #e3dbcd; color: #6d675e; font-size: 11px; font-weight: 700; }
+.vs-substep.done .vs-substep-index { background: #cfe0d1; color: #3f6b46; }
+.vs-substep-body { padding: 0 14px 14px 44px; }
+.vs-substep-body > p:first-child { margin-top: 0; }
+
+.vs-remedy { margin-top: 16px; border-top: 1px dashed #ddd5c7; padding-top: 14px; }
+.vs-remedy-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.vs-remedy-head strong { font-size: 14px; }
+.vs-lack { margin-top: 10px; }
+.vs-lack strong { display: block; color: #8b5a22; font-size: 12px; }
+.vs-model-list { display: grid; gap: 5px; margin-top: 8px; }
+.vs-model-row { display: flex; justify-content: space-between; gap: 14px; border-bottom: 1px dashed #e5ddd0; padding-bottom: 5px; color: #565048; font-size: 12px; }
+.vs-model-row.done { color: #4d6755; }
+.vs-model-row b { flex: none; color: #857f75; font-weight: 400; }
+
+.vs-banner { display: grid; gap: 3px; margin-top: 12px; border: 1px solid transparent; border-radius: 8px; padding: 11px 14px; font-size: 12px; }
+.vs-banner.ok { border-color: #b6d0ba; background: #e8f1e8; color: #33603d; }
+.vs-banner.warn { border-color: #e2c9a4; background: #f9f0e2; color: #7f5722; }
+.vs-banner strong { font-size: 14px; }
+
+.vs-note.info { border-left-color: #b3b0a6; background: #f4f1ea; color: #6a655d; }
+
+/* 代表写真の選び直し。候補を小さく並べ、いま選んでいるものに枠を付ける。 */
+.vs-portrait-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.vs-portrait-option { display: grid; gap: 4px; justify-items: center; width: 82px; padding: 4px; border: 1px solid #ddd5c7; border-radius: 8px; background: #fffdf8; cursor: pointer; font: inherit; color: #5c574f; }
+.vs-portrait-option:disabled { opacity: 0.6; cursor: default; }
+.vs-portrait-option.selected { border-color: #2b6cb0; box-shadow: 0 0 0 1px #2b6cb0 inset; }
+.vs-portrait-option img { width: 100%; aspect-ratio: 1/1; object-fit: cover; object-position: 50% 12%; border-radius: 5px; background: #efe9df; }
+.vs-portrait-option span { font-size: 11px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
+
+.vs-check { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; }
+/* 承知したうえで進めることを確かめる欄（動作要件を満たさないときの取得など）。 */
+.vs-accept { display: flex; align-items: flex-start; gap: 7px; margin-top: 9px; font-weight: 700; cursor: pointer; }
+/* 利用条件の要点。原文へのリンクを必ず添える。 */
+.vs-license-points { margin: 6px 0; padding-left: 18px; }
+.vs-license-points li { margin: 3px 0; }
+.vs-accept input { cursor: pointer; }
+.vs-check li { list-style: none; color: #857f75; font-size: 12px; }
+.vs-check li.done { color: #3f6b46; font-weight: 700; }
+.vs-btn.link { border: 0; background: transparent; color: #7a6a5f; padding: 8px 2px 0; font-size: 12px; text-decoration: underline; cursor: pointer; }
+
+/* --- 人物モデルの作成 --- */
+.vs-profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 14px; }
+.vs-profile-grid .vs-field label { font-size: 11px; }
+.vs-candidate-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 14px; }
+.vs-candidate { display: grid; gap: 6px; border: 1px solid #ddd5c7; border-radius: 8px; padding: 8px; background: #fffdf8; }
+.vs-candidate.selected { border-color: #bd5c41; box-shadow: 0 0 0 1px #bd5c41 inset; }
+.vs-candidate img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 6px; background: #efe9df; }
+.vs-candidate-placeholder { display: grid; place-items: center; aspect-ratio: 3 / 4; border-radius: 6px; background: #efe9df; color: #837d73; font-size: 12px; }
+.vs-candidate .vs-btn { width: 100%; font-size: 12px; padding: 7px 8px; }
+.vs-candidate .vs-row { gap: 6px; flex-wrap: nowrap; }
+.vs-candidate .vs-muted { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+/* 変更欄や変更の結果がある立ち絵は横幅いっぱいに広げ、元の1枚の隣へ出す。 */
+.vs-candidate.vs-figure-wide { grid-column: 1 / -1; grid-template-columns: minmax(150px, 220px) 1fr; gap: 16px; align-items: start; }
+.vs-figure-main { display: grid; gap: 6px; align-content: start; }
+/* 既定・変更・複製・削除。枠が狭いと1列では文字が1字ずつ折り返すので、2列に並べる。 */
+.vs-figure-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.vs-figure-order { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.vs-figure-actions .vs-btn { white-space: nowrap; }
+.vs-figure-edit { display: grid; gap: 8px; align-content: start; }
+.vs-figure-edit p { margin: 0; }
+.vs-figure-edit .vs-muted { white-space: normal; overflow: visible; font-size: 12px; }
+.vs-figure-edit .vs-row { flex-wrap: wrap; }
+/* 格子の中のボタンは、何もしないと横幅いっぱいに伸びる。文字の幅にとどめる。 */
+.vs-figure-edit .vs-btn { width: auto; justify-self: start; }
+.vs-figure-edit-image { width: 100%; max-width: 220px; }
+@media (max-width: 640px) {
+  .vs-candidate.vs-figure-wide { grid-template-columns: 1fr; }
+}
+.vs-candidate.review-similar { border-color: #6d9877; background: #f3f8f3; }
+.vs-candidate.review-different { border-color: #c08a76; background: #faf3f0; opacity: .75; }
+
+/* --- 人物の状態指定 --- */
+.vs-state-box {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f8f5f0;
+  border-radius: 6px;
+  border: 1px solid #e2dacd;
+}
+.vs-state-title {
+  font-weight: bold;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.vs-state-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.vs-state-grid label, .vs-state-field label {
+  font-size: 12px;
+}
+.vs-state-field {
+  margin-top: 6px;
+}
+.vs-state-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.vs-state-actions .vs-btn {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.vs-state-pill-ok {
+  color: green;
+  border-color: green;
+}
+.vs-state-pill-err {
+  color: red;
+  border-color: red;
+}
+/* 状態画像は縦長。作りこみで細部を見るため、切り抜かず大きめに出す。 */
+.vs-state-preview {
+  margin-top: 8px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.vs-state-thumb {
+  width: auto;
+  max-width: 100%;
+  height: 280px;
+  aspect-ratio: auto;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+.vs-state-warn-note {
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: #856404;
+}
+/* 人物の状態指定を開いたときの、最初の案内文。 */
+.vs-state-lead {
+  font-size: 12px;
+  margin: 6px 0 10px;
+}
+
+
+
+/* 取り消せない操作の確認ダイアログ。 */
+.confirm-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgba(28, 24, 20, .55); }
+.confirm-dialog { width: min(520px, 100%); max-height: 86vh; overflow: auto; border: 1px solid #cfc6b8; background: #fbf8f2; padding: 26px 28px 22px; box-shadow: 0 22px 60px rgba(40, 30, 22, .28); }
+.confirm-dialog h2 { margin: 0 0 12px; font: 600 20px "Yu Mincho", "YuMincho", serif; }
+.confirm-lead { margin: 0 0 14px; color: #4c483f; line-height: 1.8; font-size: 14px; }
+.confirm-items-label { margin: 0 0 6px; color: #8a4d38; font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.confirm-items { margin: 0 0 14px; padding-left: 20px; color: #5d584f; font-size: 13px; line-height: 1.9; }
+.confirm-note { margin: 0 0 14px; border-left: 3px solid #c9c0b2; padding: 8px 12px; background: #f3efe7; color: #6e685f; font-size: 12px; line-height: 1.8; }
+.confirm-error { margin: 0 0 14px; color: #9b4f3d; font-size: 12px; }
+/* 実行の前に選ばせるもの（履歴を残すか上書きするか、など）。 */
+.confirm-extra { margin: 0 0 16px; border: 1px solid #ded7c9; background: #fff; padding: 12px 14px; }
+.confirm-extra label { font-size: 12px; }
+.vs-choice { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+/* 二択を並べて選ぶカード（何を作るか）。選んだ側だけ枠と背景を濃くする。 */
+.vs-mode-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.vs-mode-card { display: grid; gap: 6px; padding: 14px 16px; text-align: left; border: 1px solid #ded7c9; border-radius: 8px; background: #fffdf8; cursor: pointer; }
+.vs-mode-card strong { font-size: 14px; color: #2e3934; }
+.vs-mode-card .vs-muted { font-size: 12px; line-height: 1.6; }
+.vs-mode-card.active { border-color: #2e3934; background: #f2efe7; }
+
+.vs-choice input { cursor: pointer; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.confirm-actions button { border: 1px solid #bdb3a6; background: #fff; color: #3b3831; padding: 11px 18px; font-size: 13px; cursor: pointer; }
+.confirm-actions button:disabled { opacity: .55; cursor: not-allowed; }
+.confirm-actions .confirm-danger { border-color: #a44b34; background: #a44b34; color: #fff; font-weight: 700; }
+.confirm-actions .confirm-danger:hover:not(:disabled) { background: #8d3f2b; }
+
+/* 進捗のあるところには必ず中止も置く（GPUは1件ずつしか使えないため）。 */
+.vs-progress-block { margin-top: 10px; }
+.vs-cancel { margin-top: 8px; }
+/* 押せない理由をボタンのすぐ下に出す。 */
+.vs-block-reason { margin-top: 6px; font-size: 12px; }
+
+/* 生成エンジンの接続状態（作品づくりの前提なので制作画面に常時出す）。 */
+.vs-engine-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; padding: 10px 14px; border: 1px solid #dfd7c9; background: #fbf8f2; }
+.vs-live-dot, .vs-offline-dot { font-size: 12px; }
+.vs-live-dot { color: #3d704b; }
+.vs-live-dot::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: #5d8a67; box-shadow: 0 0 0 4px #dce7dc; }
+.vs-offline-dot { color: #9b4f3d; }
+.vs-offline-dot::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: #b45b45; box-shadow: 0 0 0 4px #eeddd7; }
+.vs-engine-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 14px; padding: 12px 18px; border: 1px solid #c9a094; background: #fbf8f2; box-shadow: 0 10px 30px rgba(40, 30, 22, .2); font-size: 13px; }
+
+/* シーンは「出来上がり（キーフレーム）」を主役に、設定と手順を右へ。 */
+.vs-still-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-top: 14px; align-items: start; }
+.vs-still-image { display: grid; gap: 6px; width: 100%; padding: 0; border: 1px solid #ded7c9; border-radius: 8px; background: #f6f2ea; cursor: pointer; overflow: hidden; }
+.vs-still-image img { display: block; width: 100%; height: auto; }
+.vs-still-image span { padding: 0 0 8px; font-size: 11px; }
+.vs-still-image.empty { display: grid; place-items: center; min-height: 200px; cursor: default; }
+/* 合成に渡る素材（背景と、人物ごとに使う立ち絵）の一覧。高さをそろえて横に並べる。 */
+.vs-still-sources { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 2px; }
+.vs-still-source { display: grid; gap: 4px; margin: 0; }
+.vs-still-source-image { display: block; height: 132px; width: auto; max-width: 236px; aspect-ratio: 16 / 10; object-fit: cover; border: 1px solid #ddd5c7; border-radius: 7px; background: #efe9df; cursor: zoom-in; }
+/* 立ち絵は縦長の全身像。切り抜くと顔や足が欠けるので、そのまま収める。 */
+.vs-still-source-image.figure { aspect-ratio: auto; max-width: 132px; object-fit: contain; }
+.vs-still-source-image.empty { display: grid; place-items: center; width: 132px; cursor: default; }
+.vs-still-source-image.figure.empty { width: 88px; }
+/* 選んでいる背景。名前だけでは見分けにくいので、選ぶ欄のすぐ下に出す。 */
+.vs-picked-background { max-width: 280px; margin-top: 6px; }
+/* シーン画面では起点の1枚を確認できれば足りるので、小さめに出す。 */
+.vs-scene-start { max-width: 320px; }
+.vs-shot-video { display: grid; gap: 6px; margin-top: 8px; padding: 0; border: 1px solid #ded7c9; border-radius: 8px; background: #f6f2ea; cursor: pointer; overflow: hidden; }
+.vs-shot-video img, .vs-shot-video video { display: block; width: 100%; max-width: 360px; height: auto; }
+.vs-shot-video span { padding: 0 0 8px; font-size: 11px; }
+/* 生成済みのカットは「何から作って、何が出来たか」を横並びで見比べられるようにする。 */
+.vs-shot-frames { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 260px)); justify-content: start; gap: 10px; margin-top: 10px; align-items: start; }
+.vs-shot-frames > * { margin-top: 0; max-width: none; }
+.vs-shot-frames img, .vs-shot-frames video { width: 100%; max-width: none; height: auto; }
+.vs-shot-frames .empty { min-height: 120px; }
+/* カットの覚え書き。設定を畳んだままでも読めるところに置く。 */
+.vs-shot-note { margin: 10px 0 0; border-left: 3px solid #cbc2b3; padding: 2px 0 2px 10px; color: #5c574f; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+/* セリフ・ナレーションの行。上から順に読み上げられる。 */
+.vs-speech-lines { display: grid; gap: 6px; justify-items: start; }
+.vs-speech-line { display: grid; gap: 4px; width: 100%; }
+
+/* 生成物の拡大表示。 */
+.vs-lightbox { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 28px; background: rgba(24, 20, 16, .78); }
+.vs-lightbox figure { margin: 0; max-width: min(1100px, 100%); max-height: 90vh; display: grid; gap: 10px; }
+.vs-lightbox img, .vs-lightbox video { max-width: 100%; max-height: 80vh; object-fit: contain; background: #14100d; }
+.vs-lightbox figcaption { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #f3ece1; font-size: 13px; }
+.vs-lightbox .vs-btn { background: transparent; color: #f3ece1; border-color: #8b8175; }
+/* 拡大した画像は、押せば閉じる。 */
+.vs-lightbox-image { cursor: zoom-out; }
+/* 一覧から開いたときの前後の切り替え。画面の左右の端に置く。 */
+.vs-lightbox-step { position: fixed; top: 50%; transform: translateY(-50%); z-index: 71; width: 48px; height: 72px; border: 1px solid #8b8175; border-radius: 8px; background: rgba(20, 16, 13, .6); color: #f3ece1; font-size: 32px; line-height: 1; cursor: pointer; }
+.vs-lightbox-step:hover { background: rgba(20, 16, 13, .85); }
+.vs-lightbox-step.prev { left: 16px; }
+.vs-lightbox-step.next { right: 16px; }
+.vs-lightbox-count { margin-left: 12px; color: #b7ada0; font-size: 12px; }
+/* 参照画像の拡大は、基準画像と横並びで見る。 */
+.vs-lightbox-compare { display: grid; gap: 12px; width: min(1240px, 100%); max-height: 92vh; }
+.vs-lightbox-compare header { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #f3ece1; font-size: 14px; }
+.vs-lightbox-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; min-height: 0; }
+.vs-lightbox-compare-grid figure { margin: 0; display: grid; gap: 8px; min-width: 0; align-content: start; }
+.vs-lightbox-compare-grid img { width: 100%; max-height: 74vh; object-fit: contain; background: #14100d; }
+.vs-lightbox-compare-grid figcaption { color: #d9d1c4; font-size: 12px; text-align: center; }
+.vs-lightbox-compare .vs-muted { color: #b7ada0; font-size: 11px; text-align: center; }
+.vs-lightbox-compare .vs-candidate-placeholder { min-height: 40vh; }
+/* 見比べたその場で判定できるようにする操作列。 */
+.vs-lightbox-actions { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.vs-lightbox-actions .vs-muted { color: #b7ada0; font-size: 12px; }
+.vs-lightbox-actions .vs-btn.ghost { color: #f3ece1; border-color: #8b8175; }
+/* 主な操作は塗りで目立たせる（暗い背景の上でも、どれを押せば決まるか分かるように）。 */
+.vs-lightbox-actions .vs-btn:not(.ghost) { background: #f3ece1; color: #202925; border-color: #f3ece1; }
+.vs-lightbox-actions .vs-btn:not(.ghost):disabled { opacity: .6; }
+
+/* 見比べてから判定する順に、上段＝大きく比較、下段＝似ている／違う。 */
+.vs-reference-actions { display: grid; gap: 6px; margin-top: 8px; }
+.vs-reference-actions > .vs-btn { width: 100%; }
+.vs-review-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.vs-review-row .vs-btn { width: 100%; }
+
+/* 登場人物の詳細（見た目の登録状況と、人物モデルの素性）。 */
+.vs-detail-body { display: grid; gap: 6px; margin-top: 8px; font-size: 12px; color: #5c574f; }
+.vs-detail-path { font-family: ui-monospace, "Consolas", monospace; font-size: 11px; word-break: break-all; }
+.vs-model-tests-strip { display: flex; gap: 6px; margin-top: 4px; }
+.vs-model-tests-strip img { width: 33%; max-width: 96px; aspect-ratio: 3 / 4; object-fit: cover; border: 1px solid #ded7c9; border-radius: 4px; background: #f0ebe1; }
+
+
+@media (max-width: 860px) {
+  .vs-still-layout { grid-template-columns: 1fr; }
+  .vs-mode-cards { grid-template-columns: 1fr; }
+}
+.vs-engine-spacer { flex: 1; }
+.vs-engine-job { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: #4a463f; }
+
+/* 参照画像は基準と並べて判定する。 */
+.vs-reference-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.vs-reference-compare figure { margin: 0; min-width: 0; }
+.vs-reference-compare img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; }
+.vs-reference-compare figcaption { padding: 4px 0; color: #6f6a62; font-size: 10px; text-align: center; }
+
+/* 人物モデルの確認画像8枚。 */
+.vs-model-tests { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.vs-model-test { display: grid; gap: 4px; padding: 0; border: 1px solid #ded7c9; border-radius: 6px; background: #f6f2ea; cursor: pointer; overflow: hidden; }
+.vs-model-test img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; }
+.vs-model-test span { padding: 0 0 6px; color: #57635a; font-size: 10px; font-weight: 700; text-align: center; }
+.vs-review-guide { margin-top: 12px; border-left: 3px solid #bd5c41; padding: 10px 14px; background: #f7efe9; }
+.vs-review-guide strong { font-size: 13px; }
+.vs-review-guide ol { margin: 8px 0 0; padding-left: 20px; color: #5d584f; font-size: 12px; line-height: 1.9; }
+
+@media (max-width: 860px) {
+  .vs-model-tests { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.vs-project-style { margin-top: 12px; }
+.vs-project-style .vs-row { margin-top: 6px; }
+.vs-project-style input { max-width: 520px; }
+/* いま扱っている作品は、どの画面でも見えるようにしておく。 */
+.vs-project-context { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding: 8px 4px; border-bottom: 1px solid #e7e0d3; }
+.vs-project-context strong { font-size: 22px; line-height: 1.3; }
+.vs-project-context .vs-btn { margin-left: auto; }
+/* 作品の選択・作成・設定・削除をまとめる画面。 */
+.vs-project-bar strong { font-size: 15px; }
+.vs-project-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-top: 14px; }
+.vs-project-item { display: grid; gap: 4px; justify-items: start; text-align: left; padding: 12px 14px; border: 1px solid #ded7c9; border-radius: 8px; background: #fffdf8; cursor: pointer; }
+.vs-project-item:hover { border-color: #b9ad99; }
+.vs-project-item.selected { border-color: #8a7f6b; background: #f6f1e6; box-shadow: inset 0 0 0 1px #8a7f6b; }
+/* 新規作成の枠。既存の作品と地続きに見えないよう、破線と淡い地色で分ける。 */
+.vs-project-item.add { border-style: dashed; background: transparent; color: #6a655d; }
+.vs-project-item.add:hover { border-color: #8a7f6b; background: #faf7f0; }
+.vs-project-item.add.selected { border-style: dashed; border-color: #8a7f6b; background: #f6f1e6; box-shadow: inset 0 0 0 1px #8a7f6b; }
+.vs-project-item.add strong { color: #5c574f; }
+/* 選択中の作品だけの設定。上の一覧（新規作成を含む）と線で切り分ける。 */
+.vs-project-settings { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e7e0d3; }
+.vs-project-settings h3 { margin: 0 0 10px; font-size: 14px; }
+/* 更新と削除は、入力欄の並びから離して右端に寄せる。 */
+.vs-project-actions { justify-content: flex-end; margin-top: 12px; }
+/* 制作へ進む口。設定の欄とは線で分け、押す順番が分かるようにする。 */
+.vs-project-start { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid #e7e0d3; }
+/* 一覧の前に置く、その一覧の使い方の一文。 */
+.vs-grid-lead { margin: 16px 0 4px; line-height: 1.9; }
+.vs-grid-lead strong { color: #4a463f; }
+/* 折りたたみの見出しに件数などを添える。 */
+.vs-collapse > summary .vs-pill { margin-left: 8px; font-weight: 400; }
+
+/* 設定の確認・変更。 */
+.vs-settings-dialog { width: min(680px, 100%); }
+.vs-settings-list { display: grid; gap: 10px; margin: 16px 0; }
+.vs-settings-list > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 12px; align-items: baseline; border-bottom: 1px solid #e4ddd0; padding-bottom: 8px; }
+.vs-settings-list dt { color: #7d766c; font-size: 11px; font-weight: 700; }
+.vs-settings-list dd { margin: 0; color: #3f3d38; font-size: 12px; overflow-wrap: anywhere; }
+.vs-job-history { display: grid; gap: 6px; margin-top: 10px; }
+.vs-job-row { display: grid; grid-template-columns: 76px 150px minmax(0, 1fr); gap: 10px; align-items: baseline; font-size: 12px; }
+.vs-job-row .vs-muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* この端末に合わせたおすすめ。値だけでなく「なぜそれか」を必ず横に並べる。 */
+.vs-recommend-list { display: grid; gap: 8px; margin-top: 12px; }
+.vs-recommend-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: baseline; border-bottom: 1px solid #e4ddd0; padding-bottom: 8px; }
+.vs-recommend-row > div { display: grid; gap: 3px; }
+.vs-recommend-name { color: #7d766c; font-size: 11px; font-weight: 700; }
+.vs-recommend-row strong { font-size: 13px; color: #3f3d38; }
+.vs-recommend-row .vs-muted { font-size: 12px; line-height: 1.6; }
+.vs-recommend-note { color: #7c5f34; font-size: 12px; line-height: 1.6; }
+
+/* 合成の丁寧さの選択。ボタンのすぐ上に置き、押す前に選べるようにする。 */
+.vs-quality-field select { max-width: 340px; }
+
+/* --- サイドバーのある骨格 --- */
+.vs-app { display: flex; min-height: 100vh; }
+.vs-sidebar {
+  position: sticky; top: 0; align-self: flex-start;
+  flex: none; width: 236px; height: 100vh; padding: 32px 22px;
+  background: #202925; color: #f8f2e7;
+  display: flex; flex-direction: column; gap: 18px; overflow-y: auto;
+}
+.vs-brand { font: 700 18px Georgia, serif; letter-spacing: .16em; color: #d8cdb8; }
+.vs-sidebar nav { display: grid; gap: 6px; }
+.vs-nav-item {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  padding: 9px 11px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: #cfc7b8; font-size: 13px; text-align: left; cursor: pointer;
+}
+.vs-nav-item span { font: 700 10px Georgia, serif; letter-spacing: .1em; color: #8b8878; }
+.vs-nav-item:hover:not(:disabled) { background: #2b3631; color: #f8f2e7; }
+.vs-nav-item.active { background: #f2eee6; border-color: #f2eee6; color: #202925; }
+.vs-nav-item.active span { color: #6d6a5f; }
+.vs-nav-item:disabled { opacity: .45; cursor: not-allowed; }
+.vs-sidebar-settings { border-color: #5c6660; color: #e8e1d4; }
+.vs-privacy-note { margin: auto 0 0; color: #8b8878; font-size: 11px; line-height: 1.7; }
+.vs-main { flex: 1; min-width: 0; max-width: 1080px; padding: 28px 24px 64px; }
+
+/* サイドバーでは横並びの状態表示を縦に積む。 */
+.vs-sidebar .vs-engine-bar {
+  flex-direction: column; align-items: flex-start; gap: 8px; margin: 0;
+  border-color: #39443e; background: #262f2b; color: #cfc7b8; font-size: 12px;
+}
+.vs-sidebar .vs-engine-bar .vs-muted { color: #9b9789; word-break: break-all; }
+.vs-sidebar .vs-engine-spacer { display: none; }
+.vs-sidebar .vs-engine-job { flex-wrap: wrap; gap: 6px; color: #e8e1d4; }
+/* 暗い背景なので、枠線ボタンの文字色を明るいほうへ寄せる。 */
+.vs-sidebar .vs-btn.ghost { border-color: #5c6660; color: #e8e1d4; }
+.vs-sidebar .vs-btn.ghost:disabled { border-color: #414a45; color: #8b8878; }
+.vs-sidebar .vs-live-dot { color: #a8c9ae; }
+.vs-sidebar .vs-offline-dot { color: #e0a292; }
+
+/* 幅が足りないときは上端の帯にする。作業領域を狭めないよう詰めて置く。 */
+@media (max-width: 900px) {
+  .vs-app { flex-direction: column; }
+  .vs-sidebar {
+    position: sticky; top: 0; z-index: 10;
+    width: 100%; height: auto; padding: 10px 16px; gap: 8px;
+  }
+  .vs-brand, .vs-privacy-note { display: none; }
+  .vs-sidebar nav { display: flex; flex-wrap: wrap; gap: 4px; }
+  .vs-nav-item { padding: 6px 10px; }
+  .vs-nav-item span { display: none; }
+  .vs-sidebar .vs-engine-bar { flex-direction: row; align-items: center; flex-wrap: wrap; padding: 6px 10px; }
+  .vs-sidebar-settings { align-self: flex-start; padding: 5px 12px; }
+  .vs-main { padding: 18px 16px 48px; }
+}
+
+/* 生成エンジンへ送る文。長い行も折り返して全体を読めるようにする。 */
+.vs-prompt-preview {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #d8cfc0;
+  border-radius: 6px;
+  background: #faf7f2;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 置き場所の設定。ダイアログ内の小見出しと、選び方の並び。 */
+.vs-subhead { margin: 18px 0 8px; font-size: 13px; font-weight: 700; color: #46403a; }
+.vs-locations .vs-detail-path { word-break: break-all; font-size: 12px; }
+.vs-mode-list { display: grid; gap: 2px; margin-top: 8px; }
+
+/* --- 登場人物: 一覧 → 人物の画面 → 手順ごとの画面 --- */
+.vs-character-card { display: grid; gap: 8px; justify-items: start; text-align: left; font: inherit; color: inherit; cursor: pointer; margin-bottom: 0; }
+.vs-character-card:hover { border-color: #2e3934; }
+.vs-character-card .vs-thumb { width: 100%; }
+.vs-character-card-open { justify-self: end; font-size: 12px; color: #2e3934; }
+.vs-screen-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.vs-screen-head h2 { margin: 0; font-size: 20px; }
+/* 手順の画面の終わり方。下へ送っても「保存して閉じる」「閉じる」が見えるよう下に留める。 */
+.vs-screen-footer { position: sticky; bottom: 0; z-index: 10; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 18px -20px -18px; padding: 12px 20px; background: #fffdf8; border-top: 1px solid #e2dacd; border-radius: 0 0 10px 10px; }
+.vs-step-rows { display: grid; gap: 10px; margin: 12px 0 6px; }
+.vs-step-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid #e2dacd; border-radius: 8px; background: #fbf8f2; }
+.vs-step-row.next { border-color: #bd5c41; box-shadow: 0 0 0 1px #bd5c41 inset; background: #fffdf8; }
+.vs-step-row-body { display: grid; gap: 6px; min-width: 0; }
+.vs-step-thumbs { display: flex; gap: 6px; flex-wrap: wrap; }
+.vs-step-thumb { width: 54px; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 4px; background: #efe9df; }
+@media (max-width: 640px) {
+  .vs-step-row { grid-template-columns: auto minmax(0, 1fr); }
+  .vs-step-row > .vs-btn { grid-column: 1 / -1; }
+}
+
+/* 押すと拡大する画像。押せることが見て分かるようにする。 */
+.vs-zoomable { cursor: zoom-in; }
+
+/* 名前の表示と付け替え。 */
+.vs-editable-name { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.vs-editable-name h2 { margin: 0; font-size: 20px; }
+.vs-editable-name .vs-rename { padding: 3px 8px; font-size: 11px; }
+.vs-editable-name.editing .vs-input { max-width: 220px; padding: 6px 8px; }
+.vs-editable-name.editing .vs-btn { padding: 6px 10px; font-size: 12px; }
+.vs-error-inline { color: #9b3c2b; font-size: 12px; }
+
+

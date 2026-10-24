@@ -1,0 +1,210 @@
+{
+  "format_version": 1,
+  "description": "この端末の構成（VRAM・世代・ホストRAM）から、既定にする生成方法と枚数を決めるための表。tiers はVRAMの多い順に並べ、最初に条件を満たしたものを採る。各設定の選択肢には満たすべき条件を書き、満たさないときは fallback をたどる。ここに書く値は、いま使っているモデル一式（Qwen-Image-Edit-2511 fp8mixed / Z-Image / Wan 2.2 I2V 14B fp8 / MiniMax H3）が要求する実サイズを根拠にしている。",
+  "requirements": {
+    "description": "このアプリを実用的に使える下限と、余裕のある構成。合成に使う Qwen-Image-Edit-2511（fp8mixed・約20.5GB）とテキストエンコーダー（約9.4GB）がどれだけVRAMへ載るかで待ち時間が桁違いになるため、そこを基準に決めている。下限未満でも動かないわけではないが、1枚に数分以上かかり、実用にならない。",
+    "minimum": {
+      "vram_gb": 12,
+      "ram_gb": 32,
+      "label_ja": "動作要件",
+      "summary_ja": "VRAM 12GB以上・メモリ 32GB以上（NVIDIA GPU）"
+    },
+    "recommended": {
+      "vram_gb": 16,
+      "ram_gb": 48,
+      "label_ja": "推奨",
+      "summary_ja": "VRAM 16GB以上・メモリ 48GB以上"
+    },
+    "below_minimum_ja": "この端末は動作要件（VRAM 12GB以上・メモリ 32GB以上）を満たしていません。モデルの出し入れが生成のたびに起きるため、静止画1枚に数分以上かかります。取得するモデルも数十GBあるので、進める前に見合うか確かめてください。",
+    "below_recommended_ja": "動作要件は満たしていますが、推奨（VRAM 16GB以上・メモリ 48GB以上）には届きません。モデルの入れ替えが起きるぶん、1枚あたりの待ち時間が長くなります。"
+  },
+  "tiers": [
+    {
+      "id": "high",
+      "min_vram_gb": 24,
+      "label_ja": "余裕あり（VRAM 24GB以上）",
+      "summary_ja": "重いモデルをそのまま載せられます。音声付きの動画と、丁寧な合成まで選べます。",
+      "settings": {
+        "composition_quality": "careful",
+        "video_engine": "minimax_h3",
+        "candidate_count": "12"
+      }
+    },
+    {
+      "id": "standard",
+      "min_vram_gb": 16,
+      "label_ja": "標準（VRAM 16GB以上）",
+      "summary_ja": "このアプリが標準にしているモデル一式がそのまま動きます。動画は映像のみのWan 2.2が確実です。",
+      "settings": {
+        "composition_quality": "fast",
+        "video_engine": "wan22",
+        "candidate_count": "10"
+      }
+    },
+    {
+      "id": "light",
+      "min_vram_gb": 12,
+      "label_ja": "控えめ（VRAM 12GB以上・動作要件は満たす）",
+      "summary_ja": "動きますが、モデルの入れ替えが起きるぶん時間がかかります。枚数を抑えた設定を勧めます。",
+      "settings": {
+        "composition_quality": "fast",
+        "video_engine": "wan22",
+        "candidate_count": "8"
+      }
+    },
+    {
+      "id": "minimum",
+      "min_vram_gb": 0,
+      "label_ja": "動作要件未満（VRAM 12GB未満）",
+      "summary_ja": "動作要件を満たしていません。1枚あたりの待ち時間が長くなります。まず静止画だけで試し、動画は時間に余裕のあるときにしてください。",
+      "settings": {
+        "composition_quality": "fast",
+        "video_engine": "wan22",
+        "candidate_count": "8"
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "composition_quality",
+      "display_name_ja": "静止画の合成の丁寧さ",
+      "options": [
+        {
+          "value": "careful",
+          "label_ja": "丁寧に合成（数分・指定の反映が強い）",
+          "reason_ja": "高速化LoRAを外してステップ数を増やす方を既定にします。姿勢や構図の指定がよく反映されます。1枚あたりの時間は速さ優先より長くなります。",
+          "min_vram_gb": 24,
+          "fallback": "fast",
+          "unmet_note_ja": "丁寧な合成は高速化LoRAを使わずステップ数を増やすため、VRAMが24GB未満だと1枚に数分以上かかります。"
+        },
+        {
+          "value": "fast",
+          "label_ja": "速さ優先（数秒）",
+          "reason_ja": "4ステップの高速化LoRA（描き込みの手数を4回まで減らすもの）で合成し、作り直しを何度も試せるようにします。"
+        }
+      ]
+    },
+    {
+      "key": "video_engine",
+      "display_name_ja": "動画の作り方",
+      "options": [
+        {
+          "value": "minimax_h3",
+          "label_ja": "MiniMax H3（音声付き）",
+          "reason_ja": "VRAMと世代の条件を満たしているため、映像と音声を一緒に作れるH3を既定にします。",
+          "min_vram_gb": 24,
+          "min_ram_gb": 32,
+          "min_compute_capability": 12.0,
+          "fallback": "wan22",
+          "unmet_note_ja": "MiniMax H3 はテキストエンコーダーがnvfp4版（重みを4ビットまで落とした形式）のため、VRAM 24GB以上かつBlackwell世代（RTX 50xx以降）が要ります。モデルの取得も約44GBあります。",
+          "extra_note_ja": "H3のモデル一式（約44GB）は既定では取得しません。セットアップの「モデルの準備」から追加してください。"
+        },
+        {
+          "value": "wan22",
+          "label_ja": "Wan 2.2（映像のみ）",
+          "reason_ja": "14Bのfp8モデル（重みを8ビットに落とした版）を高ノイズ・低ノイズの順に1つずつ読むため、この構成でも最後まで通ります。"
+        }
+      ]
+    },
+    {
+      "key": "angle_precision",
+      "display_name_ja": "参照画像の向きの作り方",
+      "options": [
+        {
+          "value": "high",
+          "label_ja": "丁寧（角度LoRAを使う）",
+          "reason_ja": "角度LoRAを重ねても収まるVRAMがあるため、斜め・横顔の向きが安定します。",
+          "min_vram_gb": 16,
+          "fallback": "fast",
+          "unmet_note_ja": "角度LoRAは合成モデルに重ねて読むため、VRAM 16GB未満では入れ替えが増えて待ち時間が伸びます。"
+        },
+        {
+          "value": "fast",
+          "label_ja": "速い（プロンプトだけで向きを指示）",
+          "reason_ja": "追加のLoRAを読まないぶん、1枚あたりの待ち時間を短くできます。"
+        }
+      ]
+    },
+    {
+      "key": "candidate_count",
+      "display_name_ja": "人物候補の枚数",
+      "options": [
+        {
+          "value": "12",
+          "label_ja": "12枚",
+          "reason_ja": "1回に多く並べて選択肢を広く取ります。枚数のぶん、1回の生成にかかる時間は長くなります。"
+        },
+        {
+          "value": "10",
+          "label_ja": "10枚",
+          "reason_ja": "選択肢の広さと1回の生成時間の間をとった枚数です。"
+        },
+        {
+          "value": "8",
+          "label_ja": "8枚",
+          "reason_ja": "1枚あたりの生成時間が延びるため、少なめにして待ち時間を抑えます。"
+        }
+      ]
+    },
+    {
+      "key": "reference_count",
+      "display_name_ja": "参照画像の枚数",
+      "options": [
+        {
+          "value": "24",
+          "label_ja": "24枚",
+          "reason_ja": "参照画像を多めに作ります。学習の素材が増えるほど人物の再現が安定し、そのぶん作成と学習にかかる時間は長くなります。"
+        },
+        {
+          "value": "20",
+          "label_ja": "20枚",
+          "reason_ja": "再現性と所要時間の間をとった枚数です。"
+        },
+        {
+          "value": "16",
+          "label_ja": "16枚",
+          "reason_ja": "学習に足りる最小限に抑え、生成の待ち時間を短くします。"
+        }
+      ]
+    },
+    {
+      "key": "training_preset",
+      "display_name_ja": "人物モデルの学習の丁寧さ",
+      "options": [
+        {
+          "value": "careful",
+          "label_ja": "念入り（約1000ステップ）",
+          "reason_ja": "ステップ数を多くとり、人物の再現を優先します。学習にかかる時間は3つの中で最も長くなります。"
+        },
+        {
+          "value": "standard",
+          "label_ja": "標準（約500ステップ）",
+          "reason_ja": "品質と所要時間の間をとった設定です。"
+        },
+        {
+          "value": "trial",
+          "label_ja": "お試し（約120ステップ）",
+          "reason_ja": "少ないステップ数で傾向だけを確かめます。良ければ丁寧な設定で作り直せます。"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "id": "vram_below_composition",
+      "max_vram_gb": 12,
+      "message_ja": "静止画の合成に使う Qwen-Image-Edit-2511（fp8mixed＝重みを8ビットに落とした版・約20GB）がVRAMに収まりません。生成のたびにモデルの出し入れが起きるため、1枚に数分以上かかることがあります。"
+    },
+    {
+      "id": "ram_below_staging",
+      "max_ram_gb": 32,
+      "message_ja": "ComfyUIはモデルをいったんホストRAMへ置いてからVRAMへ載せます。RAMが32GB未満だと、大きなモデルを読む時点で詰まることがあります。"
+    },
+    {
+      "id": "ram_for_video",
+      "max_ram_gb": 48,
+      "video_only": true,
+      "message_ja": "動画のモデルは1つが十数GBあり、ComfyUIはそれをホストRAMへ抱えたまま次のモデルを読みます。RAMが48GB未満のときは、参照画像や動画の生成を何回かに分けると詰まりにくくなります。"
+    }
+  ]
+}

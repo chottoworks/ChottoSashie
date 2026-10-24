@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"画面が受け取ってよいもの。いまは保存先を移すときの途中経過だけ（Rust側から流す）。","local":true,"windows":["main"],"permissions":["core:event:default"]}}
