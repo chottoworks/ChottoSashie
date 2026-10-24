@@ -1,0 +1,162 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "公開するタグ（例: v0.1.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: publish
+    steps:
+      - name: Read version from tag
+        id: version
+        run: |
+          tag="${{ inputs.tag }}"
+          tag="${tag#refs/tags/}"
+          if [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            tag="v$tag"
+          fi
+          version="${tag#v}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "タグの形式が違います: ${{ inputs.tag }}"
+            exit 1
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "installer=ChottoSashie_${version}_x64-setup.exe"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.version.outputs.tag }}
+
+      - name: Require changelog entry
+        run: |
+          if ! grep -qE "^## \[${{ steps.version.outputs.version }}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+            echo "CHANGELOG.md に ${{ steps.version.outputs.version }} の見出しがありません。"
+            exit 1
+          fi
+
+      - name: Find successful Release run
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow Release \
+            --event push \
+            --branch "${{ steps.version.outputs.tag }}" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+          if [[ -z "$run_id" || "$run_id" == "null" ]]; then
+            echo "タグ ${{ steps.version.outputs.tag }} の成功した Release が見つかりません。ビルド完了を待ってから再実行してください。"
+            exit 1
+          fi
+          echo "id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-nsis
+          path: dist/windows
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.run.outputs.id }}
+
+      - name: Locate installer
+        id: files
+        run: |
+          exe="dist/windows/${{ steps.version.outputs.installer }}"
+          if [[ ! -f "$exe" ]]; then
+            echo "想定したインストーラ名が見つかりません。"
+            find dist -type f -print
+            exit 1
+          fi
+          echo "exe=$exe" >> "$GITHUB_OUTPUT"
+
+      - name: Upload installer to R2
+        env:
+          CI: true
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          if [[ -z "$CLOUDFLARE_ACCOUNT_ID" || -z "$CLOUDFLARE_API_TOKEN" || -z "$R2_BUCKET" ]]; then
+            echo "Environment publish に CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN / R2_BUCKET を登録してください。"
+            exit 1
+          fi
+          npx --yes wrangler@4 r2 object put \
+            "$R2_BUCKET/ChottoSashie/${{ steps.version.outputs.installer }}" \
+            --file "${{ steps.files.outputs.exe }}" \
+            --content-type application/octet-stream \
+            --remote
+
+      # 変更内容は CHANGELOG.md のその版の節をそのまま使う。サイトの変更履歴と同じ出どころにする。
+      - name: Write release notes
+        run: |
+          {
+            awk -v version="${{ steps.version.outputs.version }}" '
+              index($0, "## [" version "]") == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md
+            echo
+            echo "ダウンロードと導入の手順: https://chottoworks.jp/chottosashie/"
+          } > release-notes.md
+          cat release-notes.md
+
+      # 再実行しても同じ結果になるよう、あれば差し替え、無ければ作る。
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "ちょっと挿絵 $VERSION" --notes-file release-notes.md
+            gh release upload "$TAG" "${{ steps.files.outputs.exe }}" --clobber
+          else
+            gh release create "$TAG" "${{ steps.files.outputs.exe }}" \
+              --verify-tag \
+              --title "ちょっと挿絵 $VERSION" \
+              --notes-file release-notes.md
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          repository: chottoworks/ChottoFilerPage
+          token: ${{ secrets.SITE_REPO_TOKEN }}
+          path: site
+
+      - name: Update official site
+        run: |
+          node site/scripts/apply-release.mjs \
+            --app chottosashie \
+            --version "${{ steps.version.outputs.version }}" \
+            --changelog CHANGELOG.md \
+            --root site
+
+      - name: Commit and push site
+        working-directory: site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/apps.json index.html chottosashie/index.html chottosashie/changelog.html
+          if git diff --cached --quiet; then
+            echo "サイトに差分はありません。"
+            exit 0
+          fi
+          git commit -m "ちょっと挿絵の公開版を ${{ steps.version.outputs.version }} に更新する。"
+          git push

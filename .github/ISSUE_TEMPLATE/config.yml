@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 脆弱性の報告
+    url: https://github.com/chottoworks/ChottoSashie/security/advisories/new
+    about: 脆弱性は公開の Issue にせず、こちらから非公開で知らせてください。
+  - name: ダウンロードと導入の手順
+    url: https://chottoworks.jp/chottosashie/
+    about: 公式サイトの紹介ページ

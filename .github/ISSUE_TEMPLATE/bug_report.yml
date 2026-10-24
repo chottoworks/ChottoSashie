@@ -1,0 +1,52 @@
+name: 不具合の報告
+description: 動かない・期待と違う動きをする
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues は誰でも読めます。画像やログに、作品の内容や手元のフォルダ名など公開したくない情報が含まれていないか確かめてください。
+        脆弱性は、ここではなく [SECURITY.md](https://github.com/chottoworks/ChottoSashie/blob/master/SECURITY.md) の手順で知らせてください。
+  - type: input
+    id: version
+    attributes:
+      label: アプリの版
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: GPU・VRAM・メモリ
+      placeholder: "RTX 4070 Ti / VRAM 16GB / メモリ 32GB"
+    validations:
+      required: true
+  - type: dropdown
+    id: comfyui
+    attributes:
+      label: ComfyUI の使い方
+      options:
+        - 完全に専用の環境（モデルもアプリ管理）
+        - 専用ComfyUIを起動し、既存モデルを参照する
+        - 既存のComfyUIをそのまま使う
+        - 分からない
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 何をしたか
+      description: 起きるまでの手順を順に書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 何が起きたか
+      description: 画面に出た文言があればそのまま貼ってください。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待していた結果

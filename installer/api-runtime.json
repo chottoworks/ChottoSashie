@@ -8,7 +8,7 @@
     "size_bytes": 11009825,
     "license": "PSF-2.0",
     "source": "https://www.python.org/downloads/windows/",
-    "note_ja": "3.12系は2025年4月からセキュリティ修正のみになり、Windows向けのバイナリが出ていないため使えない。専用ComfyUI同梱のPythonも3.13系で、学習側と版の考え方が揃う。sha256 と size_bytes が空のときは、まだ実物と突き合わせていない。`python installer/build_api_runtime.py --pin` で実測値を記録する。"
+    "note_ja": "3.12系は2025年4月からセキュリティ修正のみになり、Windows向けのバイナリが出ていないため使えない。専用ComfyUI同梱のPythonも3.13系で、版の考え方が揃う。sha256 と size_bytes が空のときは、まだ実物と突き合わせていない。`python installer/build_api_runtime.py --pin` で実測値を記録する。"
   },
   "wheels": {
     "platform": "win_amd64",

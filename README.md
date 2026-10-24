@@ -5,6 +5,10 @@
 物語の挿絵と、その挿絵から作る短い動画を、1つの流れで作るWindowsデスクトップアプリです。
 ComfyUIを生成エンジンとして使い、画像も動画もこのPCの中だけで処理します。
 
+- ダウンロードと導入の手順: https://chottoworks.jp/chottosashie/
+- 変更履歴: [CHANGELOG.md](CHANGELOG.md)
+- 不具合の報告・要望: [Issues](https://github.com/chottoworks/ChottoSashie/issues)（[参加の仕方](CONTRIBUTING.md)）
+
 ## 作る流れ
 
 1. **作品** を登録する
@@ -175,6 +179,36 @@ pnpm tauri build
 埋め込み版Pythonの版は [`installer/api-runtime.json`](installer/api-runtime.json) で固定し、
 取得したものがSHA256と一致しなければ使いません。版を上げるときだけ `--pin` を付けて実行し、
 実測値を記録し直します。
+
+## リリース
+
+配布は GitHub Actions で行います。インストーラは公式サイトの配布元（R2）と GitHub の
+Releases に同じものを置き、公式サイトの紹介ページの版と変更履歴も合わせて更新します。
+
+1. 版を上げる。版は6か所にあり、`installer\check_version.py` で揃っているか確かめられます。
+   ```powershell
+   .\.venv\Scripts\python.exe installer\check_version.py 0.1.0
+   ```
+2. `CHANGELOG.md` の `## [Unreleased]` を `## [0.1.0] - 2026-10-24` のように版と日付へ
+   書き換える。この節がそのまま公式サイトの変更履歴と Releases の説明になります。
+   サイトに出したくない項目は書かないでください。
+3. 利用条件の一覧（`THIRD-PARTY-NOTICES.md`）が配る中身と合っていることを確かめる
+   （依存を変えたときは「配布版を作る」の手順で作り直してコミットする）。
+4. コミットして `v0.1.0` のタグを push する。**Release** ワークフローが試験・組み立て・
+   インストーラ作成まで行います（版の食い違い・変更履歴の節の欠け・利用条件の一覧の
+   古さがあれば止まります）。
+5. Release が成功したら、Actions の **Publish** をタグを指定して手で実行する。R2 への配置、
+   Releases の作成、公式サイトのリポジトリの更新まで進み、サイトは自動でデプロイされます。
+
+Publish は Environment `publish` の次の値を使います。
+
+| 名前 | 中身 |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` / `R2_BUCKET` | 配布元（R2）へ書き込むための値 |
+| `SITE_REPO_TOKEN` | 公式サイトのリポジトリへ push できるトークン |
+
+コード署名の証明書（`WINDOWS_CERTIFICATE` / `WINDOWS_CERTIFICATE_PASSWORD`）を登録すると、
+Release は署名したインストーラを作ります。無ければ未署名のまま作ります。
 
 ## テスト実行
 

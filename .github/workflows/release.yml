@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # secrets は steps.if では使えないため、有無だけ env に載せて分岐する
+    env:
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read version from tag
+        id: version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "タグの形式が違います: $tag（v0.1.0 の形にしてください）"
+            exit 1
+          fi
+          version="${tag#v}"
+          {
+            echo "version=$version"
+            echo "installer=ChottoSashie_${version}_x64-setup.exe"
+          } >> "$GITHUB_OUTPUT"
+
+      # 版は6か所に書いてある。1つでも食い違うと、インストーラの版と画面・APIの版がずれる。
+      - name: Require matching versions
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python installer/check_version.py "$VERSION"
+
+      - name: Require changelog entry
+        shell: bash
+        run: |
+          if ! grep -qE "^## \[${{ steps.version.outputs.version }}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+            echo "CHANGELOG.md に ${{ steps.version.outputs.version }} の見出し（日付付き）がありません。"
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          # 配布版に同梱する版に揃える（installer/api-runtime.json）。
+          python-version: "3.13"
+          cache: pip
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -e ".[dev]"
+          pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: |
+          python -m pytest -m "not slow"
+          pnpm test
+
+      # 組み立て → 利用条件の一覧を作り直す → 一覧を入れて組み立て直す、の順
+      # （README の「配布版を作る」と同じ）。
+      - name: Build API runtime
+        run: |
+          python installer/build_api_runtime.py
+          python installer/build_notices.py
+          python installer/build_api_runtime.py
+
+      # リポジトリの一覧と、配る中身から作った一覧が違えば止める。公開しているソースと
+      # 配布物の利用条件の記載が食い違ったまま出さないため。
+      - name: Require up-to-date third-party notices
+        shell: bash
+        run: |
+          if ! git diff --exit-code -- THIRD-PARTY-NOTICES.md; then
+            echo "THIRD-PARTY-NOTICES.md が配布物の中身と合っていません。手元で installer/build_notices.py を実行し、結果をコミットしてからタグを付け直してください。"
+            exit 1
+          fi
+
+      - name: Import Windows Authenticode certificate
+        if: env.HAS_WINDOWS_CERT == 'true'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path certificate -Force | Out-Null
+          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate/tempCert.txt certificate/certificate.pfx
+          Remove-Item certificate/tempCert.txt
+          $cert = Import-PfxCertificate -FilePath certificate/certificate.pfx `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
+          Remove-Item certificate -Recurse -Force
+          "WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Imported certificate thumbprint $($cert.Thumbprint)"
+
+      - name: Unsigned build
+        if: env.HAS_WINDOWS_CERT != 'true'
+        run: echo "WINDOWS_CERTIFICATE なし。未署名のインストーラを出します。"
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          WINDOWS_CERT_THUMBPRINT: ${{ env.WINDOWS_CERT_THUMBPRINT }}
+        run: |
+          if ($env:WINDOWS_CERT_THUMBPRINT) {
+            $json = (@{
+              bundle = @{
+                windows = @{
+                  certificateThumbprint = $env:WINDOWS_CERT_THUMBPRINT
+                }
+              }
+            } | ConvertTo-Json -Compress -Depth 5)
+            pnpm tauri build --config $json
+          } else {
+            pnpm tauri build
+          }
+
+      # Tauri は表示名（日本語）でファイル名を付ける。配布URLとファイル名は英字にそろえる。
+      - name: Rename installer
+        shell: pwsh
+        run: |
+          $found = @(Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis -Filter "*_${{ steps.version.outputs.version }}_x64-setup.exe")
+          if ($found.Count -ne 1) {
+            Write-Host "インストーラが1つに決まりません:"
+            Get-ChildItem -Recurse apps/desktop/src-tauri/target/release/bundle | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item $found[0].FullName "release/${{ steps.version.outputs.installer }}"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-nsis
+          path: release/${{ steps.version.outputs.installer }}
+          if-no-files-found: error
