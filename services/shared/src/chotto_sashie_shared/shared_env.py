@@ -77,26 +77,38 @@ def app_resources_root() -> Path:
     )
 
 
-def app_data_root() -> Path:
-    """アプリのデータ領域（DBと生成物の保存先）。"""
-    override = os.environ.get(DATA_DIR_ENV)
-    if override and override.strip() not in {"", "."}:
-        return Path(override).expanduser().resolve()
+def _default_root(folder: str) -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
-        return Path(local_app_data) / _DATA_FOLDER
-    return Path.cwd() / f".{_DATA_FOLDER.lower()}"
+        return Path(local_app_data) / folder
+    return Path.cwd() / f".{folder.lower()}"
+
+
+def _overridden_root(env_name: str) -> Path | None:
+    override = os.environ.get(env_name)
+    if override and override.strip() not in {"", "."}:
+        return Path(override).expanduser().resolve()
+    return None
+
+
+def default_app_data_root() -> Path:
+    """環境変数で変えていないときのデータ領域（利用者の実データが入る場所）。"""
+    return _default_root(_DATA_FOLDER)
+
+
+def default_shared_root() -> Path:
+    """環境変数で変えていないときの共有フォルダ（利用者の実データが入る場所）。"""
+    return _default_root(_SHARED_FOLDER)
+
+
+def app_data_root() -> Path:
+    """アプリのデータ領域（DBと生成物の保存先）。"""
+    return _overridden_root(DATA_DIR_ENV) or default_app_data_root()
 
 
 def shared_root() -> Path:
     """ComfyUI本体とモデルの共有フォルダ。"""
-    override = os.environ.get(SHARED_DIR_ENV)
-    if override and override.strip() not in {"", "."}:
-        return Path(override).expanduser().resolve()
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if local_app_data:
-        return Path(local_app_data) / _SHARED_FOLDER
-    return Path.cwd() / f".{_SHARED_FOLDER.lower()}"
+    return _overridden_root(SHARED_DIR_ENV) or default_shared_root()
 
 
 def shared_comfyui_root() -> Path:

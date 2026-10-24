@@ -23,18 +23,28 @@ os.environ["CHOTTO_SASHIE_SHARED_DIR"] = str(_isolated_shared_dir)
 
 import pytest  # noqa: E402 - 保存先の隔離を先に行う
 
-from chotto_sashie_shared.shared_env import app_data_root, shared_root  # noqa: E402
+from chotto_sashie_shared.shared_env import (  # noqa: E402
+    app_data_root,
+    default_app_data_root,
+    default_shared_root,
+    shared_root,
+)
 
 
 def _real_data_roots() -> list[Path]:
-    """利用者の実データが置かれる場所（ここへ向いていたら隔離できていない）。"""
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if not local_app_data:
-        return []
-    try:
-        return [Path(local_app_data).resolve()]
-    except OSError:
-        return []
+    """利用者の実データが置かれる場所（ここへ向いていたら隔離できていない）。
+
+    `%LOCALAPPDATA%` 全体ではなく、アプリが既定で使うフォルダだけを見る。
+    Windows の一時フォルダは既定で `%LOCALAPPDATA%\\Temp` にあり、全体を見ると
+    一時フォルダに作った試験用の保存先まで実データとみなしてしまう。
+    """
+    roots: list[Path] = []
+    for root in (default_app_data_root(), default_shared_root()):
+        try:
+            roots.append(root.resolve())
+        except OSError:
+            continue
+    return roots
 
 
 def _reject_real_locations() -> None:
