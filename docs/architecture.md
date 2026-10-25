@@ -82,7 +82,9 @@ ComfyUI本体とアプリが取得したモデルは、アプリのデータ領�
 
 ## 4. SQLite
 
-表は `schema_meta`、`jobs`、`projects`、`characters`、`character_candidates`、`character_figures`、`background_assets`、`prop_assets`、`still_images`、`still_image_characters`、`shots`、`shot_beats`、`shot_speech_lines`、`character_figure_edits`、`prompt_translations`、`setup_config`、`preferences`。初回リリースの形をそのまま定義に書いており、旧版からの移行処理は持たない。
+表は `schema_meta`、`jobs`、`projects`、`characters`、`character_candidates`、`character_figures`、`background_assets`、`prop_assets`、`still_images`、`still_image_characters`、`shots`、`shot_beats`、`shot_speech_lines`、`character_figure_edits`、`prompt_translations`、`setup_config`、`preferences`。定義（`database.SCHEMA`）には常に最新の形を書き、新しく作るDBはその版（`SCHEMA_VERSION`、`schema_meta.schema_version` に記録）から始まる。前の版のDBは、起動のたびに `Database._migrate` が1版ずつ追いつかせる。形を変えるときは版を1つ上げ、前の版からの変更を `_MIGRATIONS` に足す。版を上げる記録と形の変更は同じトランザクションで行うので、途中で落ちても次の起動でその版からやり直せる。このアプリより新しい版のDBは、知らない形のまま書き換えないよう開かずに止める。
+
+`characters.portrait_image_path` は一覧に出す代表写真（立ち絵とは別の写し）で、一覧には既定で写真の全体を出す（正方形の枠に収め、縦横の比が合わない分は余白にする）。利用者が範囲を決めたときだけ、その範囲を `characters.portrait_crop`（画像の幅・高さに対する割合のJSON）に記録し、`GET /api/v1/characters/{id}/portrait` が配信のときに切り出す。写真そのものは切らないので、いつでも全体へ戻せる。範囲は写真に合わせたものなので、代表写真を差し替えたら外す。代表写真を決めずに範囲を決めたときは、そのとき出ている既定の立ち絵を代表写真として固定する（既定の立ち絵は後から入れ替わり、範囲だけが別の画像へ当たってしまうため）。
 
 `projects.illustration_style` は作品全体で共通する挿絵画風を保存し、`characters.art_style` は互換性を保ったまま人物固有の小さな雰囲気補正として扱う。`character_figures` は人物の実体である立ち絵を保存する。画像の持ち主はこの記録で、静止画は `still_image_characters.figure_id` から参照するだけにする（静止画を消しても立ち絵は残り、立ち絵を消しても合成済みの静止画は残る）。既定の立ち絵は印を保存せず、読むときに決める——出来上がる順で選択が入れ替わらないようにするためで、保存する印は利用者が選んだ1枚だけを表す。人物の髪型・髪色、目の特徴・目の色は独立した構造化列とし、変えてはいけない特徴は順序を保つJSON配列で保存する。候補画像は人物、親ジョブ、表示順、seed、プロンプト、ComfyUI prompt ID、出力情報、基準選択を永続化する。自動生成seedはバッチごとに暗号学的乱数で更新し、画面とJSONで1刻みを失わないJavaScript安全整数範囲に限定する。候補を作り直すときの前の回は、既定で上書き（基準画像だけ残して消す）とし、設定（`preferences.candidate_history`）で「履歴として残す」に切り替えられる。基準画像を決めたあとは、選ばなかった候補を画像ごとまとめて消せる。人物を削除すると候補と立ち絵も連動して消える。
 

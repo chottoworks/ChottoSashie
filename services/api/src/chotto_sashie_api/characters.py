@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from sqlite3 import Row
@@ -13,7 +14,7 @@ from uuid import uuid4
 
 from .database import Database
 from .projects import ProjectRepository
-from .schemas import CharacterCreate, CharacterRead, CharacterUpdate
+from .schemas import CharacterCreate, CharacterRead, CharacterUpdate, PortraitCrop
 
 
 class CharacterNotFoundError(KeyError):
@@ -22,6 +23,10 @@ class CharacterNotFoundError(KeyError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _parse_crop(value: str) -> PortraitCrop | None:
+    return PortraitCrop.model_validate(json.loads(value)) if value else None
 
 
 def _to_character(row: Row) -> CharacterRead:
@@ -33,6 +38,7 @@ def _to_character(row: Row) -> CharacterRead:
     # 合成に使える立ち絵が何枚あるか（0枚なら静止画を作れない）。
     figure_count = int(row["figure_count"]) if "figure_count" in columns else 0
     portrait_source = row["portrait_source"] if "portrait_source" in columns else ""
+    portrait_crop = _parse_crop(row["portrait_crop"] if "portrait_crop" in columns else "")
     # 代表写真を決めていなければ既定の立ち絵が出る。既定の付け替えや立ち絵の置き換えでも
     # 人物の更新時刻は変わらないので、出ている立ち絵の版も版に含める。
     default_figure_version = (
@@ -44,6 +50,7 @@ def _to_character(row: Row) -> CharacterRead:
         name=row["name"],
         has_portrait_image=has_portrait,
         portrait_source=portrait_source,
+        portrait_crop=portrait_crop,
         figure_count=figure_count,
         portrait_version=f"{row['updated_at']}|{default_figure_version}",
         created_at=row["created_at"],
@@ -146,15 +153,39 @@ class CharacterRepository:
         """代表写真を差し替える。None を渡すと既定（立ち絵）へ戻す。
 
         `source` はどの候補を選んだかの覚え書きで、一覧に「選択中」を出すために使う。
+        範囲の指定は前の画像に合わせたものなので、差し替えたら外す（全体を出す）。
         """
         self.get(character_id)
         with self.database.connect() as connection:
             connection.execute(
                 """
                 UPDATE characters
-                SET portrait_image_path = ?, portrait_source = ?, updated_at = ?
+                SET portrait_image_path = ?, portrait_source = ?, portrait_crop = '',
+                    updated_at = ?
                 WHERE id = ?
                 """,
                 (str(image_path) if image_path else "", source, _now(), character_id),
             )
+        return self.get(character_id)
+
+    def portrait_crop(self, character_id: str) -> PortraitCrop | None:
+        """代表写真のうち一覧に出す範囲。未指定なら None（全体を出す）。"""
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT portrait_crop FROM characters WHERE id = ?", (character_id,)
+            ).fetchone()
+        if row is None:
+            raise CharacterNotFoundError(character_id)
+        return _parse_crop(row["portrait_crop"])
+
+    def set_portrait_crop(self, character_id: str, crop: PortraitCrop | None) -> CharacterRead:
+        """一覧に出す範囲を決める。None で指定をやめ、全体を出す。"""
+        value = crop.model_dump_json() if crop else ""
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE characters SET portrait_crop = ?, updated_at = ? WHERE id = ?",
+                (value, _now(), character_id),
+            )
+            if cursor.rowcount != 1:
+                raise CharacterNotFoundError(character_id)
         return self.get(character_id)

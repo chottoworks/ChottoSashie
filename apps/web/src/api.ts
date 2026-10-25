@@ -25,6 +25,10 @@ export function characterImageUrl(characterId: string): string {
 export function characterPortraitUrl(characterId: string): string {
   return `${apiBaseUrl}/api/v1/characters/${characterId}/portrait`;
 }
+/** 範囲を切り出す前の代表写真（範囲を決める画面で全体を見せる）。 */
+export function characterPortraitSourceUrl(characterId: string): string {
+  return `${apiBaseUrl}/api/v1/characters/${characterId}/portrait/source`;
+}
 export function stillImageUrl(stillImageId: string): string {
   return `${apiBaseUrl}/api/v1/still-images/${stillImageId}/image`;
 }
@@ -301,12 +305,21 @@ export interface Character {
   /** 合成に使う画像とは別に、一覧用の代表写真を決めているか。 */
   has_portrait_image?: boolean;
   portrait_source?: string;
+  /** 代表写真のうち一覧に出す範囲。null なら全体を出す。 */
+  portrait_crop?: PortraitCrop | null;
   has_character_model?: boolean;
   /** 出来上がっている立ち絵の枚数。0なら合成に使える人物画像がまだ無い。 */
   figure_count?: number;
   /** 一覧に出す写真の版。出ている画像が変わるたびに変わる。 */
   portrait_version?: string;
   updated_at?: string;
+}
+/** 代表写真のうち一覧に出す範囲。画像の幅・高さに対する割合（0〜1）。 */
+export interface PortraitCrop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 /** 代表写真に選べる画像1件。 */
 export interface PortraitOption {
@@ -831,6 +844,14 @@ export const selectPortrait = (characterId: string, optionId: string) =>
     "POST",
     { option_id: optionId },
     "代表写真を変更できませんでした",
+  );
+/** 一覧に出す範囲を決める。null で全体へ戻す（保存してある画像そのものは切らない）。 */
+export const setPortraitCrop = (characterId: string, crop: PortraitCrop | null) =>
+  apiSend<Character>(
+    `/api/v1/characters/${characterId}/portrait/crop`,
+    "PUT",
+    { crop },
+    "トリミングを保存できませんでした",
   );
 export const uploadCharacterPortrait = (characterId: string, file: File) =>
   apiUpload<Character>(

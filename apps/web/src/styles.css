@@ -43,8 +43,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .vs-btn[aria-pressed="true"]:disabled { background: #2e3934; border-color: #2e3934; color: #fbf6ec; cursor: default; }
 .vs-btn.danger { border-color: #9b4f3d; background: transparent; color: #9b4f3d; }
 .vs-thumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; border-radius: 7px; border: 1px solid #ddd5c7; background: #efe9df; }
-/* 人物の一覧に出す代表写真。全身像が入っても顔が切れないよう、正方形で上寄りに切る。 */
-.vs-thumb.face { aspect-ratio: 1/1; object-position: 50% 12%; }
+/* 人物の一覧に出す代表写真。正方形の枠に写真の全体を収め、縦横の比が合わない分は余白にする。
+   切り詰めたいときは利用者が範囲を決める（決めた範囲だけが画像として届く）。 */
+.vs-thumb.face { aspect-ratio: 1/1; object-fit: contain; }
 .vs-muted { color: #837d73; font-size: 12px; }
 .vs-error { color: #9b3d2c; background: #f6e6df; border: 1px solid #e2b8a8; padding: 9px 12px; border-radius: 7px; margin-bottom: 14px; font-size: 13px; }
 .vs-ok { color: #3f6b46; font-size: 12px; }
@@ -108,8 +109,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .vs-portrait-option { display: grid; gap: 4px; justify-items: center; width: 82px; padding: 4px; border: 1px solid #ddd5c7; border-radius: 8px; background: #fffdf8; cursor: pointer; font: inherit; color: #5c574f; }
 .vs-portrait-option:disabled { opacity: 0.6; cursor: default; }
 .vs-portrait-option.selected { border-color: #2b6cb0; box-shadow: 0 0 0 1px #2b6cb0 inset; }
-.vs-portrait-option img { width: 100%; aspect-ratio: 1/1; object-fit: cover; object-position: 50% 12%; border-radius: 5px; background: #efe9df; }
+.vs-portrait-option img { width: 100%; aspect-ratio: 1/1; object-fit: contain; border-radius: 5px; background: #efe9df; }
 .vs-portrait-option span { font-size: 11px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; }
+
+/* 代表写真の、一覧での見え方とトリミング。トリミング中は左に写真の全体と枠、右に一覧の枠での見え方。 */
+.vs-portrait-trim { display: grid; gap: 6px; justify-items: start; margin-top: 14px; border-top: 1px dashed #ddd5c7; padding-top: 12px; }
+.vs-portrait-trim > .vs-cropper, .vs-portrait-trim > .vs-row { justify-self: stretch; }
+.vs-portrait-preview { width: 150px; transition: opacity .15s; }
+.vs-portrait-preview.busy { opacity: .5; }
+/* 画面に入れるとき、下に付いてくる「閉じる」の帯に隠れない所まで動かす。 */
+.vs-cropper { margin-top: 8px; scroll-margin: 16px 0 88px; }
+/* 操作の列はいつも写真の横に置き、横長の写真は縮めて収める（下へ回すと画面の外へ出る）。
+   狭い画面でだけ下へ回す。 */
+.vs-cropper-body { display: flex; gap: 14px; align-items: flex-start; }
+@media (max-width: 640px) { .vs-cropper-body { flex-wrap: wrap; } }
+/* 枠の外を暗くする影が画面全体へ広がらないよう、写真の外は切る。 */
+.vs-cropper-stage { position: relative; display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; line-height: 0; user-select: none; touch-action: none; background: #efe9df; }
+/* 写真と横の操作が1画面に収まるよう、高さは画面に合わせて抑える。 */
+.vs-cropper-stage img { display: block; max-width: 100%; max-height: min(380px, 60vh); }
+/* 枠の外を暗くして、どこが一覧に出るかを見せる。 */
+.vs-cropper-frame { position: absolute; box-sizing: border-box; border: 2px solid #fffdf8; outline: 1px solid #2e3934; box-shadow: 0 0 0 9999px rgba(30, 28, 25, 0.45); cursor: move; }
+.vs-cropper-handle { position: absolute; width: 14px; height: 14px; border: 2px solid #2e3934; border-radius: 3px; background: #fffdf8; }
+/* 四隅のつまみは枠の内側に置く（写真の端に寄せても切れない）。 */
+.vs-cropper-handle.nw { left: -2px; top: -2px; cursor: nwse-resize; }
+.vs-cropper-handle.ne { right: -2px; top: -2px; cursor: nesw-resize; }
+.vs-cropper-handle.sw { left: -2px; bottom: -2px; cursor: nesw-resize; }
+.vs-cropper-handle.se { right: -2px; bottom: -2px; cursor: nwse-resize; }
+.vs-cropper-side { display: grid; flex: none; gap: 8px; justify-items: start; width: 220px; }
+.vs-cropper-side > p { margin: 0; }
+.vs-cropper-actions { margin-top: 4px; }
+.vs-crop-preview { display: grid; place-items: center; width: 150px; aspect-ratio: 1/1; overflow: hidden; border: 1px solid #ddd5c7; border-radius: 7px; background: #efe9df; }
+.vs-crop-preview-window { position: relative; overflow: hidden; max-width: 100%; max-height: 100%; }
+.vs-crop-preview-window img { position: absolute; max-width: none; }
+.vs-cropper-square { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
 
 .vs-check { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; }
 /* 承知したうえで進めることを確かめる欄（動作要件を満たさないときの取得など）。 */

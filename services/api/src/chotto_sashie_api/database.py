@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 from chotto_sashie_shared.character_studio import CHARACTER_CANDIDATES_TABLE_DDL
@@ -13,13 +15,17 @@ from .still_image_characters import STILL_IMAGE_CHARACTERS_TABLE_DDL
 from .translation import TRANSLATION_TABLE_DDL
 
 
+# DBの形の版。下の SCHEMA は常に最新の形を書き、新しく作るDBはこの版から始まる。
+# 形を変えるときは版を1つ上げ、前の版のDBを追いつかせる手順を `_MIGRATIONS` に足す。
+SCHEMA_VERSION = 2
+
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '1');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '{SCHEMA_VERSION}');
 
 {JOBS_TABLE_DDL}
 
@@ -60,6 +66,8 @@ CREATE TABLE IF NOT EXISTS characters (
     portrait_image_path TEXT NOT NULL DEFAULT '',
     -- どの候補を代表写真に選んだか（選択中の印を出すためだけに持つ）。
     portrait_source TEXT NOT NULL DEFAULT '',
+    -- 代表写真のうち一覧に出す範囲（JSON。画像の幅・高さに対する割合）。空なら全体を出す。
+    portrait_crop TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -233,8 +241,49 @@ ON shot_speech_lines(shot_id, beat_id, ordinal);
 """
 
 
+def _add_portrait_crop(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "ALTER TABLE characters ADD COLUMN portrait_crop TEXT NOT NULL DEFAULT ''"
+    )
+
+
+# 版ごとの移行手順。キーの版へ上げるために、1つ前の版のDBへ行う変更。
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    2: _add_portrait_crop,
+}
+
+
 class Database(SqliteDatabase):
     """このアプリのDB。接続設定は共有のSqliteDatabaseに従う。"""
 
     def __init__(self, path: Path):
         super().__init__(path, SCHEMA)
+
+    def initialize(self) -> None:
+        super().initialize()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """前の版で作られたDBを、1版ずつ今の形へ追いつかせる。
+
+        版を上げる記録と形の変更は同じトランザクションで行う。途中で落ちても
+        「形は変わったのに版は古い」状態が残らず、次の起動でその版からやり直せる。
+        """
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            current = int(row["value"])
+        if current > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"このDBは新しい版のアプリで作られています（DBの版 {current}、"
+                f"このアプリが扱える版 {SCHEMA_VERSION}）"
+            )
+        for version in range(current + 1, SCHEMA_VERSION + 1):
+            with self.connect() as connection:
+                connection.execute("BEGIN")
+                _MIGRATIONS[version](connection)
+                connection.execute(
+                    "UPDATE schema_meta SET value = ? WHERE key = 'schema_version'",
+                    (str(version),),
+                )

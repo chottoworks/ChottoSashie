@@ -132,6 +132,7 @@ from .character_portraits import (
     CANDIDATE_OPTION_PREFIX,
     DEFAULT_OPTION_ID,
     FIGURE_OPTION_PREFIX,
+    crop_portrait,
     delete_portrait,
     parse_candidate_option_id,
     parse_figure_option_id,
@@ -284,6 +285,7 @@ from .schemas import (
     CharacterFigureOrder,
     CharacterFigureUpdate,
     CharacterRead,
+    PortraitCropRequest,
     PortraitOption,
     PortraitSelectRequest,
     CharacterUpdate,
@@ -1340,20 +1342,72 @@ def delete_character(character_id: str) -> Response:
 # 分からない。表示専用の1枚をここで別に持つ。差し替えても立ち絵にも合成にも影響しない。
 
 
-@app.get("/api/v1/characters/{character_id}/portrait")
-def get_character_portrait(character_id: str) -> Response:
-    """一覧に出す代表写真。決めていなければ既定の立ち絵を返す。"""
+def _portrait_source_image(character_id: str) -> tuple[Path, Path, bool]:
+    """一覧に出す写真の元画像（範囲を切り出す前）の保存領域・場所と、代表写真かどうか。
+
+    代表写真を決めていなければ既定の立ち絵（このときは範囲の指定を当てない）。
+    """
     repository = CharacterRepository(database)
     try:
         portrait_path = repository.portrait_image_path(character_id)
     except CharacterNotFoundError as error:
         raise HTTPException(status_code=404, detail="登場人物が見つかりません") from error
     if portrait_path is not None and portrait_path.is_file():
-        return _serve_image_response(_CHARACTER_PORTRAIT_ROOT, portrait_path)
+        return _CHARACTER_PORTRAIT_ROOT, portrait_path, True
     figure = CharacterFigureRepository(database).default_figure(character_id)
     if figure is None:
         raise HTTPException(status_code=404, detail="画像が登録されていません")
-    return _serve_image_response(figures_dir(settings.data_dir), Path(figure.image_path))
+    return figures_dir(settings.data_dir), Path(figure.image_path), False
+
+
+@app.get("/api/v1/characters/{character_id}/portrait")
+def get_character_portrait(character_id: str) -> Response:
+    """一覧に出す代表写真。範囲を決めていればその範囲だけ、決めていなければ全体を返す。"""
+    image_root, image_path, is_portrait = _portrait_source_image(character_id)
+    # 範囲は代表写真に合わせて決めたもの。写真が見当たらず立ち絵が出るときには当てない。
+    crop = CharacterRepository(database).portrait_crop(character_id) if is_portrait else None
+    if crop is None:
+        return _serve_image_response(image_root, image_path)
+    try:
+        content, _ = read_served_image(image_root, image_path)
+    except ImageNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    cropped, media_type = crop_portrait(content, crop)
+    return Response(
+        content=cropped,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/api/v1/characters/{character_id}/portrait/source")
+def get_character_portrait_source(character_id: str) -> Response:
+    """範囲を切り出す前の代表写真（範囲を決める画面で、全体を見せるために使う）。"""
+    image_root, image_path, _ = _portrait_source_image(character_id)
+    return _serve_image_response(image_root, image_path)
+
+
+@app.put("/api/v1/characters/{character_id}/portrait/crop", response_model=CharacterRead)
+def set_character_portrait_crop(
+    character_id: str, request: PortraitCropRequest
+) -> CharacterRead:
+    """一覧に出す範囲を決める（None で全体へ戻す）。保存してある画像そのものは切らない。
+
+    代表写真を決めていない（既定の立ち絵が出ている）ときは、いま出ている立ち絵を
+    代表写真として固定してから範囲を記録する。既定の立ち絵は後から入れ替わることが
+    あり、範囲だけが別の画像へ当たってしまうため。
+    """
+    repository = CharacterRepository(database)
+    try:
+        portrait_path = repository.portrait_image_path(character_id)
+    except CharacterNotFoundError as error:
+        raise HTTPException(status_code=404, detail="登場人物が見つかりません") from error
+    if request.crop is not None and (portrait_path is None or not portrait_path.is_file()):
+        figure = CharacterFigureRepository(database).default_figure(character_id)
+        if figure is None or not figure.image_path:
+            raise HTTPException(status_code=404, detail="画像が登録されていません")
+        _save_figure_as_portrait(repository, character_id, figure)
+    return repository.set_portrait_crop(character_id, request.crop)
 
 
 @app.post("/api/v1/characters/{character_id}/portrait", response_model=CharacterRead)
@@ -1460,9 +1514,7 @@ async def select_character_portrait(
             raise HTTPException(status_code=404, detail="立ち絵が見つかりません") from error
         if figure.character_id != character_id or not figure.image_path:
             raise HTTPException(status_code=404, detail="立ち絵が見つかりません")
-        content = Path(figure.image_path).read_bytes()
-        destination = save_portrait(_CHARACTER_PORTRAIT_ROOT, character_id, content, ".png")
-        return repository.set_portrait_image(character_id, destination, source=option_id)
+        return _save_figure_as_portrait(repository, character_id, figure)
 
     candidate_id = parse_candidate_option_id(option_id)
     if candidate_id is None:
@@ -1476,6 +1528,17 @@ async def select_character_portrait(
     content = (await _candidate_image_path(candidate)).read_bytes()
     destination = save_portrait(_CHARACTER_PORTRAIT_ROOT, character_id, content, ".png")
     return repository.set_portrait_image(character_id, destination, source=option_id)
+
+
+def _save_figure_as_portrait(
+    repository: CharacterRepository, character_id: str, figure: CharacterFigureRead
+) -> CharacterRead:
+    """立ち絵の写しを代表写真にする（立ち絵が置き換えられても一覧の写真は変わらない）。"""
+    content = Path(figure.image_path).read_bytes()
+    destination = save_portrait(_CHARACTER_PORTRAIT_ROOT, character_id, content, ".png")
+    return repository.set_portrait_image(
+        character_id, destination, source=f"{FIGURE_OPTION_PREFIX}{figure.id}"
+    )
 
 
 # --- 立ち絵 ---

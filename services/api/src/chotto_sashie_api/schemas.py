@@ -126,6 +126,27 @@ class CharacterUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class PortraitCrop(BaseModel):
+    """代表写真のうち一覧に出す範囲。画像の幅・高さに対する割合（0〜1）で持つ。
+
+    割合で持つのは、元の画像の大きさに左右されないため。範囲が画像からはみ出す指定は
+    受け付けない。
+    """
+
+    x: float = Field(ge=0, lt=1)
+    y: float = Field(ge=0, lt=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _inside_image(self) -> PortraitCrop:
+        # 画面側で割合を計算すると端で丸め誤差が出るので、わずかなはみ出しは許す。
+        tolerance = 1e-6
+        if self.x + self.width > 1 + tolerance or self.y + self.height > 1 + tolerance:
+            raise ValueError("範囲が画像からはみ出しています")
+        return self
+
+
 class CharacterRead(BaseModel):
     id: str
     project_id: str
@@ -134,6 +155,8 @@ class CharacterRead(BaseModel):
     has_portrait_image: bool = False
     # 代表写真に選んでいる候補の指定子（未設定なら空）。
     portrait_source: str = ""
+    # 代表写真のうち一覧に出す範囲。None なら全体を出す。
+    portrait_crop: PortraitCrop | None = None
     # 出来上がっている立ち絵の枚数。0なら合成に使える人物画像がまだ無い。
     figure_count: int = 0
     # 一覧に出す写真の版。出ている画像が変わるたびに変わる（画像URLの付け分けに使う）。
@@ -153,6 +176,11 @@ class PortraitOption(BaseModel):
 
 class PortraitSelectRequest(BaseModel):
     option_id: str = Field(min_length=1, max_length=200)
+
+
+class PortraitCropRequest(BaseModel):
+    # None で範囲の指定をやめ、全体を出す。
+    crop: PortraitCrop | None = None
 
 
 # --- 立ち絵 ---

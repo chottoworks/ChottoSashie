@@ -703,6 +703,12 @@ export function CharacterStudio({
             ))}
           </div>
           {overviewExtras}
+          {/* 代表写真などを操作したあと、上の「一覧へ」まで戻らずに閉じられるようにする。 */}
+          <div className="vs-screen-footer">
+            <button className="vs-btn" onClick={onClose}>
+              閉じる
+            </button>
+          </div>
         </div>
       )}
 

@@ -9,6 +9,7 @@ import { LocationSettings } from "./LocationSettings";
 import { SettingsDialog } from "./SettingsDialog";
 import { EditableName } from "./EditableName";
 import { useLightbox } from "./Lightbox";
+import { PortraitCropper } from "./PortraitCropper";
 import { formatBytes, safeFileName } from "./format";
 import { chosenFigureId, withChosenFigure } from "./stillImageFigure";
 import { useRememberedSetting } from "./preferences";
@@ -1997,9 +1998,10 @@ function AssetsTab({
 
 // ============================ 登場人物 ============================
 
-/** 一覧に出す代表写真を選び直す。
+/** 一覧に出す代表写真を選び直し、一覧に出す範囲を決める。
 
-    立ち絵には触れないので、何度変えても生成結果は変わらない。 */
+    立ち絵には触れないので、何度変えても生成結果は変わらない。一覧には既定で
+    写真の全体を出し、範囲を決めたときだけその範囲を出す。 */
 function PortraitPicker({
   character,
   onChanged,
@@ -2011,7 +2013,9 @@ function PortraitPicker({
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [cropping, setCropping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const portraitVersion = encodeURIComponent(character.portrait_version ?? character.id);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2077,7 +2081,11 @@ function PortraitPicker({
                 className={`vs-portrait-option${option.selected ? " selected" : ""}`}
                 disabled={busy}
                 title={option.label}
-                onClick={() => void apply(() => api.selectPortrait(character.id, option.id))}
+                onClick={() => void apply(async () => {
+                  await api.selectPortrait(character.id, option.id);
+                  // 範囲は前の写真に合わせたもの。写真を変えたら決め直してもらう。
+                  setCropping(false);
+                })}
               >
                 <img src={api.apiUrl(option.url)} alt={option.label} />
                 <span>{option.label}</span>
@@ -2095,10 +2103,63 @@ function PortraitPicker({
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.currentTarget.value = "";
-              if (file) void apply(() => api.uploadCharacterPortrait(character.id, file));
+              if (file) void apply(async () => {
+                await api.uploadCharacterPortrait(character.id, file);
+                setCropping(false);
+              });
             }}
           />
         </label>
+
+        <div className="vs-portrait-trim">
+          {cropping ? (
+            <>
+              {!character.has_portrait_image && (
+                <p className="vs-muted">
+                  いま一覧に出ている立ち絵を代表写真にしてトリミングします。
+                </p>
+              )}
+              <PortraitCropper
+                src={`${api.characterPortraitSourceUrl(character.id)}?v=${portraitVersion}`}
+                initial={character.portrait_crop ?? null}
+                busy={busy}
+                onSave={(crop) => void apply(async () => {
+                  await api.setPortraitCrop(character.id, crop);
+                  setCropping(false);
+                })}
+                onCancel={() => setCropping(false)}
+              />
+            </>
+          ) : (
+            <>
+              {/* 選んだ写真が一覧でどう見えるかを、その場で出す（一覧と同じ枠・同じ画像）。 */}
+              <span className="vs-muted">一覧での見え方</span>
+              <img
+                className={`vs-thumb face vs-portrait-preview${busy ? " busy" : ""}`}
+                src={`${api.characterPortraitUrl(character.id)}?v=${portraitVersion}`}
+                alt={`${character.name}の代表写真`}
+              />
+              <div className="vs-row">
+                <button
+                  type="button"
+                  className="vs-btn ghost"
+                  disabled={busy}
+                  onClick={() => setCropping(true)}
+                >
+                  トリミングする
+                </button>
+                <button
+                  type="button"
+                  className="vs-btn ghost"
+                  disabled={busy || !character.portrait_crop}
+                  onClick={() => void apply(() => api.setPortraitCrop(character.id, null))}
+                >
+                  全体を表示
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </details>
   );
@@ -2240,8 +2301,8 @@ function CharactersTab({ projectId, propsRevision }: { projectId: string; propsR
               )}
             </div>
             {character.figure_count ? (
-              // 一覧は顔で見分ける。立ち絵は全身なのでそのまま出すと胴体だけが写る。
-              // 代表写真（顔が見える1枚）を出す。決めていなければ既定の立ち絵に落ちる。
+              // 一覧は顔で見分ける。代表写真（顔が見える1枚）を出し、決めていなければ
+              // 既定の立ち絵に落ちる。範囲を決めていればその範囲だけが返ってくる。
               <img
                 className="vs-thumb face"
                 src={`${api.characterPortraitUrl(character.id)}?v=${encodeURIComponent(character.portrait_version ?? character.id)}`}
