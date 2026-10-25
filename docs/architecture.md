@@ -111,6 +111,7 @@ MiniMax H3 へ渡すプロンプトの組み立て（`shot_video.build_shot_prom
 ```
 integrated_multimodal_description:
 [Shot 1]
+The scene opens exactly on <Picture 1>, in its original scene: the same framing, camera position, people, place, lighting and visual style.
 Single continuous shot, no cuts. Choreography for one unbroken 5-second arc:
 Second 0–5: {映像}
 （セリフがあれば At 0s the young woman on the left says "…" / 続く行は Then … says "…" /
@@ -123,6 +124,8 @@ overall_soundscape:
 non_diegetic_music:
 {劇伴。無ければ N/A}
 ```
+
+**映像の欄は、起点の画像の場面そのものから始まると言い切る一文で始める**（`OPENING_FRAME_DIRECTIVE`）。起点の画像はテキストエンコーダへ `<Picture 1>` として、DiTへは先頭のコマの条件として渡るが、どちらも貼り付けではなく条件なので、動きだけを書くと画像を人物や場所の参考にとどめ、別の構図・画風から始める（同じ種で比べると、全身の水彩の静止画から、顔の寄りの写実の動画が始まった）。公式i2vテンプレートが "from <Picture 1> in its original scene" "The scene opens exactly on image 1" と書くのに合わせる。カットの動画は必ず起点の画像を渡して作るので、この一文は常に置く。
 
 **使わない欄は空にせず `N/A` と書く。**要らないと言い切ったほうが効く。声を入れないカットには、唇を閉じたまま・リップシンクの動きなし・発話の種類を数え上げる、という長い無音指定を置く（`SILENCE_DIRECTIVE`）。`No dialogue.` だけでは、書いていないセリフを喋る（実機で繰り返し確認）。**`Audio:` のような行に短い否定を書くと、その文字自体が読み上げられることがある。**
 

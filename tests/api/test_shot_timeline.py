@@ -18,7 +18,9 @@ from PIL import Image
 
 from chotto_sashie_shared.jobs import JobRepository
 from chotto_sashie_api import main
+from chotto_sashie_api import shots
 from chotto_sashie_api.database import Database
+from chotto_sashie_api.shot_video import OPENING_FRAME_DIRECTIVE
 from chotto_sashie_api.still_images import StillImageRepository
 
 _TINY_PNG = base64.b64decode(
@@ -977,6 +979,39 @@ def test_note_does_not_invalidate_the_prepared_prompt(client: TestClient, fake_c
     state = _prompt_state(client, shot_id, engine="minimax_h3")
     assert state["ready"] is True
     assert state["stale"] is False
+
+
+def test_prompt_prepared_by_an_older_format_is_rebuilt(
+    client: TestClient, fake_comfy: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """文の組み立て方を変えたら、指示が同じでも、前の組み立て方で用意した文は使わない。
+
+    使い回すと、組み立て方の直し（起点の画像から始めさせる一文など）が、文を用意済みの
+    カットにだけ効かない。
+    """
+    still_image_id = _still_image(client)
+    shot_id = client.post(
+        f"/api/v1/still-images/{still_image_id}/shots", json={"motion_prompt": "she waits"}
+    ).json()["id"]
+    _prepare_prompt(client, shot_id)
+
+    monkeypatch.setattr(shots, "PROMPT_FORMAT_VERSION", shots.PROMPT_FORMAT_VERSION + 1)
+
+    assert _prompt_state(client, shot_id, engine="minimax_h3")["stale"] is True
+    _generate(client, shot_id)
+    assert _prompt_state(client, shot_id, engine="minimax_h3")["stale"] is False
+
+
+def test_h3_video_opens_on_the_start_image(client: TestClient, fake_comfy: dict) -> None:
+    """動きだけを書いたカットでも、起点の画像の場面から始めるよう言い切って送る。"""
+    still_image_id = _still_image(client)
+    shot_id = client.post(
+        f"/api/v1/still-images/{still_image_id}/shots", json={"motion_prompt": "she waits"}
+    ).json()["id"]
+
+    _generate(client, shot_id)
+
+    assert OPENING_FRAME_DIRECTIVE in _video_prompts(fake_comfy)[-1]
 
 
 def test_note_stays_writable_while_the_prompt_is_locked(client: TestClient, fake_comfy: dict) -> None:

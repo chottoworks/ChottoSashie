@@ -8,6 +8,7 @@ from sqlite3 import Connection, Row
 from uuid import uuid4
 
 from .database import Database
+from .shot_video import PROMPT_FORMAT_VERSION
 from .still_images import StillImageNotFoundError, StillImageRepository
 from .schemas import (
     ShotBeatCreate,
@@ -119,12 +120,13 @@ def _lines_signature(lines: list[ShotSpeechLineRead]) -> list[list[object]]:
 
 
 def prompt_signature(shot: ShotRead) -> str:
-    """文のもとになる指示の指紋。ここが変われば、用意した文はもう使えない。
+    """文のもとになる指示と、文の組み立て方の版の指紋。ここが変われば、用意した文はもう使えない。
 
     起点の画像・構図・覚え書きはこの文に入らないので含めない（作り直しを促す必要がない）。
     """
     payload = json.dumps(
         {
+            "format": PROMPT_FORMAT_VERSION,
             "motion": shot.motion_prompt.strip(),
             "speech": _lines_signature(shot.speech_lines),
             "ambience": shot.ambience_prompt.strip(),

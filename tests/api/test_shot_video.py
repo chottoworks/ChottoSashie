@@ -188,7 +188,7 @@ def test_generate_video_with_minimax_h3(
     prompt = workflow["7"]["inputs"]["prompt"]
     # H3は欄に分けた形で、常に時間付き。動きの指示は Second の行に入る。
     assert prompt.startswith("integrated_multimodal_description:")
-    assert "ゆっくり" in prompt.splitlines()[3]
+    assert "ゆっくり" in next(line for line in prompt.splitlines() if line.startswith("Second "))
     assert workflow["6"]["inputs"]["image"] == fake_comfy_h3["uploads"][0]
     assert workflow["8"]["inputs"]["noise_seed"] == 7
     # 解像度・尺・fpsは指定しなければH3の既定（17k+5フレーム・24fps）になる。

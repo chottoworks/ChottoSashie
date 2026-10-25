@@ -11,7 +11,12 @@
 時刻の指定も `Audio:` の中で `at 4s` の形で書く（公式t2vの
 "the score bursting at 4s, closing the last 1s" と同じ）。
 
-- 1行目は場面全体の説明。ここが「映像の記述」の足場になる
+- 映像の欄は、**起点の画像（`<Picture 1>`）の場面そのものから始まる**と言い切る一文で
+  始める。H3 は起点の画像を最初のコマへ貼り付けるのではなく、条件として読むだけなので、
+  言わないと画像を人物や場所の参考にとどめ、別の構図・画風から始める（同じ種で比べると、
+  全身の水彩の静止画から、顔の寄りの写実の動画が始まった）。公式i2vテンプレートの
+  "from <Picture 1> in its original scene" / "The scene opens exactly on image 1" と同じ
+- 続けて場面全体の説明。ここが「映像の記述」の足場になる
 - 時間分割は ``Second 0–3:`` の行にし、**映像のことだけ**を書く。区間が1つでもこの形にする
   （尺が分かっているなら常に時間付きで渡す）
 - セリフは ``At 0s the young woman on the left says "…"`` の形で、映像の記述の後半へまとめる。
@@ -64,6 +69,17 @@ NO_SPEECH_DIRECTIVE = "No text, no logos, no dialogue."
 # "ambient background sound only" でも喋った）。公式t2vの無音例にも `Audio:` 行は無い。
 # 1カットが「切り替わらない1続きの映像」であることを先に置く足場。
 CONTINUOUS_SHOT_PREFIX = "Single continuous shot, no cuts."
+# 起点の画像から始めさせる一文。H3 は起点の画像（`<Picture 1>` として渡る）を条件として
+# 読むだけなので、構図・画風までそのまま始めることを言い切る。カットの動画は必ず起点の
+# 画像を渡して作る（静止画・前のカットの最終フレーム・構図を変えた1枚のどれか）。
+OPENING_FRAME_DIRECTIVE = (
+    "The scene opens exactly on <Picture 1>, in its original scene: the same framing, "
+    "camera position, people, place, lighting and visual style."
+)
+
+# 文の組み立て方の版。組み立て方（下の言い回しや並び）を変えたら1つ上げる。保存済みの
+# 文はこの版も含めた指紋で見分けるので、上げると古い組み立て方の文は作り直しになる。
+PROMPT_FORMAT_VERSION = 2
 
 # H3のプロンプトは、欄に分けた形で書く。使わない欄には ``N/A`` を置く
 # （空にするより、要らないと言い切ったほうが効く）。
@@ -230,7 +246,7 @@ def build_shot_prompt(
     labelled = any(beat.duration_seconds > 0 for beat in beats)
     total = sum(max(0.0, beat.duration_seconds) for beat in beats)
 
-    description: list[str] = ["[Shot 1]"]
+    description: list[str] = ["[Shot 1]", OPENING_FRAME_DIRECTIVE]
     spoken: list[str] = []
     if labelled:
         description.append(

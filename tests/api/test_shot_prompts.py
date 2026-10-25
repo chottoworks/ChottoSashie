@@ -23,6 +23,7 @@ from chotto_sashie_api.shot_video import (
     NARRATION_ONLY_DIRECTIVE,
     NOT_APPLICABLE,
     NO_VOICE_DIRECTIVE,
+    OPENING_FRAME_DIRECTIVE,
     SILENCE_DIRECTIVE,
     UNKNOWN_SPEAKER,
     Beat,
@@ -220,12 +221,23 @@ def test_visual_lines_never_carry_speech() -> None:
             assert '"' not in line, line
 
 
-def test_description_field_opens_with_the_continuous_shot_anchor() -> None:
-    """映像の欄は、1続きの映像だと分かる足場から始める。"""
+def test_description_field_opens_on_the_start_image() -> None:
+    """映像の欄は、起点の画像の場面から始まると言い切り、1続きの映像だと分かる足場を続ける。
+
+    言わないと H3 は起点の画像を参考にとどめ、別の構図・画風から始める。
+    """
     prompt = build_shot_prompt(engine="minimax_h3", beats=[Beat(5.0, "she waits")])
-    description = _field(prompt, FIELD_DESCRIPTION)
-    assert description.splitlines()[0] == "[Shot 1]"
-    assert description.splitlines()[1].startswith(CONTINUOUS_SHOT_PREFIX)
+    lines = _field(prompt, FIELD_DESCRIPTION).splitlines()
+    assert lines[0] == "[Shot 1]"
+    assert lines[1] == OPENING_FRAME_DIRECTIVE
+    assert "<Picture 1>" in lines[1]
+    assert lines[2].startswith(CONTINUOUS_SHOT_PREFIX)
+
+
+def test_wan_is_not_told_about_picture_tags() -> None:
+    """Wan 2.2 は起点の画像を最初のコマとして使うので、H3向けの言い回しは渡さない。"""
+    prompt = build_shot_prompt(engine="wan22", beats=[], motion_prompt="she waits")
+    assert "Picture" not in prompt
 
 
 def test_wan_never_receives_speech_or_ambience() -> None:
@@ -267,11 +279,11 @@ def test_beats_become_timed_choreography_lines() -> None:
         ],
     )
     lines = _field(prompt, FIELD_DESCRIPTION).splitlines()
-    assert lines[1] == (
+    assert lines[2] == (
         "Single continuous shot, no cuts. Choreography for one unbroken 5.5-second arc:"
     )
-    assert lines[2] == "Second 0\u20133: She turns around."
-    assert lines[3] == "Second 3\u20135.5: She walks away."
+    assert lines[3] == "Second 0\u20133: She turns around."
+    assert lines[4] == "Second 3\u20135.5: She walks away."
 
 
 def test_single_beat_still_gets_a_time_label() -> None:
@@ -281,10 +293,10 @@ def test_single_beat_still_gets_a_time_label() -> None:
         beats=[Beat(duration_seconds=3.0, motion_prompt="she turns around")],
     )
     lines = _field(prompt, FIELD_DESCRIPTION).splitlines()
-    assert lines[1] == (
+    assert lines[2] == (
         "Single continuous shot, no cuts. Choreography for one unbroken 3-second arc:"
     )
-    assert lines[2] == "Second 0\u20133: She turns around."
+    assert lines[3] == "Second 0\u20133: She turns around."
 
 
 def test_shot_without_beats_uses_its_own_duration() -> None:
@@ -299,7 +311,8 @@ def test_unknown_duration_falls_back_to_a_plain_line() -> None:
     prompt = build_shot_prompt(engine="minimax_h3", beats=[], motion_prompt="she waits")
     assert "Second" not in prompt
     description = _field(prompt, FIELD_DESCRIPTION).splitlines()
-    assert description[1] == "Single continuous shot, no cuts. She waits."
+    assert description[1] == OPENING_FRAME_DIRECTIVE
+    assert description[2] == "Single continuous shot, no cuts. She waits."
 
 
 @pytest.mark.parametrize(
