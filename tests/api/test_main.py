@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -21,3 +22,10 @@ def test_health(tmp_path: Path, monkeypatch) -> None:
         # デスクトップ版が「同じポートに居るのは本当に自分のAPIか」を判断する材料。
         assert body["app"] == "chotto-sashie"
         assert body["data_dir"] == str(main.settings.data_dir)
+        # 名乗る版は、版を書いている場所（pyproject.toml）と同じもの。
+        assert body["version"] == _pyproject_version()
+
+
+def _pyproject_version() -> str:
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    return tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]

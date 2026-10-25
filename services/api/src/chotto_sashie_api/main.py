@@ -127,6 +127,7 @@ from chotto_sashie_shared.jobs import (
     JobTransition,
 )
 
+from . import __version__
 from .assets import AssetNotFoundError, AssetRepository, build_asset_prompt, variation_name
 from .character_portraits import (
     CANDIDATE_OPTION_PREFIX,
@@ -473,7 +474,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="ちょっと挿絵 ローカルAPI",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
 )
 # Tauri 2のWindows本番WebViewが使用する送信元。
