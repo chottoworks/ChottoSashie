@@ -2020,10 +2020,15 @@ async def monitor_asset_generation(
     base_url: str,
     prompt: str,
     *,
+    input_prompt: str = "",
     poll_seconds: float = 0.5,
     max_polls: int = 3600,
 ) -> None:
-    """背景・小物の生成を見届け、完成画像を素材へ保存する。"""
+    """背景・小物の生成を見届け、完成画像を素材へ保存する。
+
+    `prompt` は ComfyUI へ渡した指示文、`input_prompt` は「生成プロンプト」欄へ入れた文
+    （欄から作らないバリエーションでは空）。どちらも出来上がった画像と一緒に記録する。
+    """
     repository = AssetRepository(database, table)
     image_root = asset_dir(settings.data_dir, table)
     client = ComfyClient(base_url)
@@ -2034,7 +2039,9 @@ async def monitor_asset_generation(
         destination = save_uploaded_image(image_root, asset_id, content, ".png")
         _record_or_discard(
             destination,
-            lambda: repository.set_image(asset_id, destination, source_prompt=prompt),
+            lambda: repository.set_image(
+                asset_id, destination, source_prompt=prompt, input_prompt=input_prompt
+            ),
             (AssetNotFoundError,),
         )
         if previous is not None and previous != destination:
@@ -2308,7 +2315,8 @@ def _build_asset_router(*, table: str, path_prefix: str, not_found_message: str)
                     ),
                 )
                 await monitor_asset_generation(
-                    job_id, table, asset_id, prompt_id, base_url, prompt
+                    job_id, table, asset_id, prompt_id, base_url, prompt,
+                    input_prompt=request.prompt,
                 )
             except (ComfyConnectionError, OSError, ValueError) as error:
                 _fail_job(job_id, str(error), "ASSET_GENERATION_SUBMIT_FAILED")

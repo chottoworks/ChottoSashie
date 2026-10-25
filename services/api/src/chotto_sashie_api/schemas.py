@@ -61,7 +61,10 @@ class AssetRead(BaseModel):
     category: str
     description: str
     has_image: bool
+    # 今の画像を作るときに ComfyUI へ渡した指示文（作品の画風を足したもの）。
     source_prompt: str
+    # 今の画像を作るときに「生成プロンプト」欄へ入れた文。欄の初期値に使う。
+    input_prompt: str = ""
     # 背景だけ: このバリエーションの元（自分が元なら None）。
     base_asset_id: str | None = None
     # 背景だけ: 元と何が違うのか（「夕方」「机に本」）。

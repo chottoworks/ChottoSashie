@@ -54,9 +54,11 @@ def test_initialize_brings_a_version_1_database_up_to_date(tmp_path: Path) -> No
     """0.1.0 で作ったDB（版1）も、起動したときに今の形へ追いつき、中身は残る。"""
     database = Database(tmp_path / "video-api.sqlite3")
     database.initialize()
-    # 版1の形へ戻す（代表写真の範囲の列はまだ無い）。
+    # 版1の形へ戻す（代表写真の範囲の列も、欄へ入れた文の列もまだ無い）。
     with database.connect() as connection:
         connection.execute("ALTER TABLE characters DROP COLUMN portrait_crop")
+        connection.execute("ALTER TABLE background_assets DROP COLUMN input_prompt")
+        connection.execute("ALTER TABLE prop_assets DROP COLUMN input_prompt")
         connection.execute("UPDATE schema_meta SET value = '1' WHERE key = 'schema_version'")
         connection.execute(
             "INSERT INTO projects(id, name, created_at, updated_at) VALUES ('p', '作品', 'now', 'now')"
@@ -80,6 +82,53 @@ def test_initialize_brings_a_version_1_database_up_to_date(tmp_path: Path) -> No
     assert version == str(SCHEMA_VERSION)
     assert character["name"] == "人物"
     assert character["portrait_crop"] == ""
+
+
+def test_initialize_fills_the_typed_prompt_of_version_2_assets(tmp_path: Path) -> None:
+    """版2のDBの背景・小物は、ComfyUI へ渡した指示文から、欄へ入れた文を取り出して埋める。"""
+    database = Database(tmp_path / "video-api.sqlite3")
+    database.initialize()
+    variation_prompt = (
+        "Change only the time of day, the light and the weather of the place in image 1. "
+        "Keep the same place, the same layout, the same camera position and the same "
+        "perspective as image 1. There are no people anywhere in the scene. "
+        "作品全体の画風: 淡い水彩"
+    )
+    with database.connect() as connection:
+        connection.execute("ALTER TABLE background_assets DROP COLUMN input_prompt")
+        connection.execute("ALTER TABLE prop_assets DROP COLUMN input_prompt")
+        connection.execute("UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'")
+        connection.execute(
+            "INSERT INTO projects(id, name, created_at, updated_at) VALUES ('p', '作品', 'now', 'now')"
+        )
+        for table, asset_id, source_prompt in [
+            ("prop_assets", "styled", "an old mantel clock 作品全体の画風: 淡い水彩"),
+            ("prop_assets", "plain", "a red umbrella"),
+            ("prop_assets", "uploaded", ""),
+            ("background_assets", "variation", variation_prompt),
+        ]:
+            connection.execute(
+                f"""
+                INSERT INTO {table}(id, project_id, name, source_prompt, created_at, updated_at)
+                VALUES (?, 'p', '素材', ?, 'now', 'now')
+                """,
+                (asset_id, source_prompt),
+            )
+
+    database.initialize()
+
+    with database.connect() as connection:
+        typed = {
+            row["id"]: row["input_prompt"]
+            for table in ("prop_assets", "background_assets")
+            for row in connection.execute(f"SELECT id, input_prompt FROM {table}").fetchall()
+        }
+    assert typed == {
+        "styled": "an old mantel clock",
+        "plain": "a red umbrella",
+        "uploaded": "",
+        "variation": "",
+    }
 
 
 def test_initialize_refuses_a_database_from_a_newer_app(tmp_path: Path) -> None:

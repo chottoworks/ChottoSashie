@@ -120,3 +120,50 @@ def test_regenerate_overwrites_image(client, fake_comfy, project_id) -> None:
 
     asset = client.get(f"/api/v1/background-assets/{asset_id}").json()
     assert asset["source_prompt"] == "bookshelf v2"
+
+
+@pytest.mark.parametrize("path_prefix", ["background-assets", "prop-assets"])
+def test_generate_keeps_the_prompt_as_typed(client, fake_comfy, project_id, path_prefix) -> None:
+    """ComfyUI へは作品の画風を足して渡し、生成プロンプト欄へ戻す文は入れたままの形で残す。"""
+    client.patch(f"/api/v1/projects/{project_id}", json={"illustration_style": "淡い水彩"})
+    asset_id = client.post(
+        f"/api/v1/projects/{project_id}/{path_prefix}", json={"name": "古い置き時計"}
+    ).json()["id"]
+
+    client.post(
+        f"/api/v1/{path_prefix}/{asset_id}/generate",
+        json={"base_url": "http://127.0.0.1:8190", "prompt": "an old mantel clock"},
+    )
+
+    asset = client.get(f"/api/v1/{path_prefix}/{asset_id}").json()
+    assert asset["source_prompt"] == "an old mantel clock 作品全体の画風: 淡い水彩"
+    assert asset["input_prompt"] == "an old mantel clock"
+
+
+def test_uploading_an_image_drops_the_prompt(client, fake_comfy, project_id) -> None:
+    """アップロードした画像はプロンプトから作ったものではないので、前の文を欄へ戻さない。"""
+    asset_id = client.post(
+        f"/api/v1/projects/{project_id}/prop-assets", json={"name": "傘"}
+    ).json()["id"]
+    client.post(
+        f"/api/v1/prop-assets/{asset_id}/generate",
+        json={"base_url": "http://127.0.0.1:8190", "prompt": "a red umbrella"},
+    )
+
+    uploaded = client.post(
+        f"/api/v1/prop-assets/{asset_id}/image",
+        files={"file": ("umbrella.png", _png(), "image/png")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["source_prompt"] == ""
+    assert uploaded.json()["input_prompt"] == ""
+
+
+def _png() -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buffer, format="PNG")
+    return buffer.getvalue()

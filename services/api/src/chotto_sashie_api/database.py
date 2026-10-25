@@ -17,7 +17,7 @@ from .translation import TRANSLATION_TABLE_DDL
 
 # DBの形の版。下の SCHEMA は常に最新の形を書き、新しく作るDBはこの版から始まる。
 # 形を変えるときは版を1つ上げ、前の版のDBを追いつかせる手順を `_MIGRATIONS` に足す。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -96,7 +96,11 @@ CREATE TABLE IF NOT EXISTS background_assets (
     category TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
     image_path TEXT NOT NULL DEFAULT '',
+    -- 今の画像を作るときに ComfyUI へ渡した指示文（作品の画風を足したもの）。
     source_prompt TEXT NOT NULL DEFAULT '',
+    -- 今の画像を作るときに、利用者が「生成プロンプト」欄へ入れた文。欄の初期値に出す。
+    -- 画像をアップロードしたときや、背景のバリエーション（欄から作らない）では空。
+    input_prompt TEXT NOT NULL DEFAULT '',
     -- NULL なら自分が元。元を消してもバリエーションは残す（それぞれが元になる）。
     base_asset_id TEXT REFERENCES background_assets(id) ON DELETE SET NULL,
     -- 元と何が違うのか（「夕方」「机に本」）。名前の括弧書きの元で、元の名前を変えたときに
@@ -116,7 +120,11 @@ CREATE TABLE IF NOT EXISTS prop_assets (
     category TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
     image_path TEXT NOT NULL DEFAULT '',
+    -- 今の画像を作るときに ComfyUI へ渡した指示文（作品の画風を足したもの）。
     source_prompt TEXT NOT NULL DEFAULT '',
+    -- 今の画像を作るときに、利用者が「生成プロンプト」欄へ入れた文。欄の初期値に出す。
+    -- 画像をアップロードしたときや、背景のバリエーション（欄から作らない）では空。
+    input_prompt TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -247,9 +255,44 @@ def _add_portrait_crop(connection: sqlite3.Connection) -> None:
     )
 
 
+# 版2までのアプリが、背景・小物の指示文へ作品の画風を足すときに挟んだ区切り。
+_V2_STYLE_MARKER = " 作品全体の画風: "
+# 版2までのアプリが、背景のバリエーションの指示文へ必ず入れた一文。
+_V2_VARIATION_SENTENCE = (
+    "Keep the same place, the same layout, the same camera position and the same "
+    "perspective as image 1."
+)
+
+
+def _add_asset_input_prompt(connection: sqlite3.Connection) -> None:
+    """背景・小物に、生成プロンプト欄へ入れた文の列を足し、記録済みの指示文から埋める。
+
+    版2のDBは ComfyUI へ渡した指示文（`source_prompt`）だけを持つ。欄から生成したものは
+    「欄の文 + 区切り + 画風」か「欄の文」そのものなので、区切りより前を戻す。
+    バリエーションの指示文は欄から作っていないので埋めない。
+    """
+    for table in ("background_assets", "prop_assets"):
+        connection.execute(
+            f"ALTER TABLE {table} ADD COLUMN input_prompt TEXT NOT NULL DEFAULT ''"
+        )
+        rows = connection.execute(
+            f"SELECT id, source_prompt FROM {table} WHERE source_prompt != ''"
+        ).fetchall()
+        for row in rows:
+            source = row["source_prompt"]
+            if _V2_VARIATION_SENTENCE in source:
+                continue
+            cut = source.rfind(_V2_STYLE_MARKER)
+            connection.execute(
+                f"UPDATE {table} SET input_prompt = ? WHERE id = ?",
+                (source[:cut] if cut >= 0 else source, row["id"]),
+            )
+
+
 # 版ごとの移行手順。キーの版へ上げるために、1つ前の版のDBへ行う変更。
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _add_portrait_crop,
+    3: _add_asset_input_prompt,
 }
 
 

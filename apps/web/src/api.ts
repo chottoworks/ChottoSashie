@@ -337,7 +337,10 @@ export interface Asset {
   category: string;
   description: string;
   has_image: boolean;
+  /** 今の画像を作るときに ComfyUI へ渡した指示文（作品の画風を足したもの）。 */
   source_prompt: string;
+  /** 今の画像を作るときに「生成プロンプト」欄へ入れた文。アップロードやバリエーションでは空。 */
+  input_prompt: string;
   /** 背景だけ: このバリエーションの元（自分が元なら null）。 */
   base_asset_id?: string | null;
   created_at: string;

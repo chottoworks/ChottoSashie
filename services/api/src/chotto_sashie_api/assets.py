@@ -38,6 +38,7 @@ def _to_asset(row: Row) -> AssetRead:
         description=row["description"],
         has_image=bool(row["image_path"]),
         source_prompt=row["source_prompt"],
+        input_prompt=row["input_prompt"],
         # 背景だけが持つ列。小物のテーブルには無いので、あるときだけ読む。
         base_asset_id=row["base_asset_id"] if "base_asset_id" in columns else None,
         variant_label=row["variant_label"] if "variant_label" in columns else "",
@@ -198,17 +199,24 @@ class AssetRepository:
             raise AssetNotFoundError(asset_id)
         return Path(row["image_path"]) if row["image_path"] else None
 
-    def set_image(self, asset_id: str, image_path: Path, source_prompt: str = "") -> AssetRead:
+    def set_image(
+        self,
+        asset_id: str,
+        image_path: Path,
+        source_prompt: str = "",
+        input_prompt: str = "",
+    ) -> AssetRead:
+        """画像を差し替える。指示文はその画像を作ったときのもので、アップロードなら空。"""
         self.get(asset_id)
         timestamp = _now()
         with self.database.connect() as connection:
             connection.execute(
                 f"""
                 UPDATE {self.table}
-                SET image_path = ?, source_prompt = ?, updated_at = ?
+                SET image_path = ?, source_prompt = ?, input_prompt = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (str(image_path), source_prompt, timestamp, asset_id),
+                (str(image_path), source_prompt, input_prompt, timestamp, asset_id),
             )
         return self.get(asset_id)
 

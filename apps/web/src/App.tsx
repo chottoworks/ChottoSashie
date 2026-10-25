@@ -1626,6 +1626,11 @@ function AssetsTab({
 
   /** 背景・小物1件のカード。グループの画面でも小物の一覧でも同じものを使う。 */
   function renderAssetCard(asset: api.Asset) {
+    // 欄に手を入れるまでは、今の画像を作ったときの文を出す（そのまま作り直したり、
+    // 少し直して作り直したりできる）。
+    const prompt = prompts[asset.id] ?? asset.input_prompt;
+    // 生成するまでは、書き換えた文を捨てて今の画像を作ったときの文へ戻せる。
+    const promptEdited = prompts[asset.id] !== undefined && prompts[asset.id] !== asset.input_prompt;
     return (
             <div key={asset.id} className="vs-card">
               <EditableName
@@ -1651,22 +1656,39 @@ function AssetsTab({
                 </div>
               )}
               <div className="vs-field" style={{ marginTop: 10 }}>
-                <label>生成プロンプト</label>
+                <div className="vs-field-head">
+                  <label htmlFor={`asset-prompt-${asset.id}`}>生成プロンプト</label>
+                  <button
+                    type="button"
+                    className="vs-btn ghost vs-field-revert"
+                    disabled={!promptEdited}
+                    onClick={() =>
+                      setPrompts((current) => {
+                        const next = { ...current };
+                        delete next[asset.id];
+                        return next;
+                      })
+                    }
+                  >
+                    元に戻す
+                  </button>
+                </div>
                 <textarea
+                  id={`asset-prompt-${asset.id}`}
                   className="vs-textarea"
                   placeholder={promptHint}
-                  value={prompts[asset.id] ?? ""}
+                  value={prompt}
                   onChange={(e) => setPrompts((p) => ({ ...p, [asset.id]: e.target.value }))}
                 />
               </div>
               <div className="vs-row">
                 <button
                   className="vs-btn"
-                  disabled={gen.running || !(prompts[asset.id] ?? "").trim()}
+                  disabled={gen.running || !prompt.trim()}
                   onClick={() =>
                     void gen.run(
                       async () => {
-                        const r = await api.generateAsset(kind, asset.id, { prompt: (prompts[asset.id] ?? "").trim() });
+                        const r = await api.generateAsset(kind, asset.id, { prompt: prompt.trim() });
                         return { job_id: r.job_id };
                       },
                       reload,

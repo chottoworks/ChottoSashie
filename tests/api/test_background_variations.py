@@ -141,6 +141,13 @@ def test_time_variation_sends_only_the_background(
     # 文を入れると人が湧く実測があるので、毎回打ち消す。
     assert "There are no people anywhere in the scene." in prompt
 
+    # 生成プロンプト欄から作ったものではないので、欄に出す文は持たない。
+    variation = client.get(
+        f"/api/v1/background-assets/{response.json()['asset']['id']}"
+    ).json()
+    assert variation["source_prompt"] == prompt
+    assert variation["input_prompt"] == ""
+
 
 def test_prop_variation_edits_the_background_instead_of_redrawing_it(
     client: TestClient, fake_comfy: dict
