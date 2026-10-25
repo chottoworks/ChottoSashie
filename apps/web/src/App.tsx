@@ -1641,8 +1641,8 @@ function AssetsTab({
                 }}
               />
               {asset.has_image ? (
-                // 画像は長期キャッシュで配られるので、作り直したら別のURLにする。
-                // idだけを付けていたころは、最初に作った1枚がいつまでも出ていた。
+                // 画像は長期キャッシュで配られるので、作り直したら別のURLにする
+                // （idだけのURLでは、最初に作った1枚が出続ける）。
                 <img
                   className="vs-thumb vs-zoomable"
                   src={`${api.assetImageUrl(kind, asset.id)}?v=${encodeURIComponent(asset.updated_at)}`}
@@ -4199,8 +4199,9 @@ function ExportTab({ projectId, projectName }: { projectId: string; projectName:
   // 書き出し済みの動画。作り直すまで残るので、開き直しても取り出せる。
   const [exported, setExported] = useState<api.ProjectExportStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // 既定はカット動画のfpsに合わせる（null）。前回の値は覚えない——覚えると、作り方を
-  // 変えた作品で前の作品の値が残り、コマの間引き・水増しが起きる（16のままH3を書き出していた）。
+  // 既定はカット動画のfpsに合わせる（null）。前回の値は覚えない——覚えると、作り方の
+  // 違う作品へ前の作品の値が持ち越され、コマの間引き・水増しが起きる（H3で作ったカットを、
+  // 別の作品で選んだ16fpsのまま書き出すなど）。
   const [fps, setFps] = useState<number | null>(null);
   const cutFps = exported?.cut_fps ?? [];
 
