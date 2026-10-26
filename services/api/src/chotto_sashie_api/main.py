@@ -3909,7 +3909,7 @@ async def compose_shot_frame(
     if not instruction.strip():
         raise HTTPException(
             status_code=409,
-            detail="構図の変更内容を入力してください（例: バストアップに寄る、背後から見た構図）",
+            detail="構図の変更内容を入力してください（例: バストアップにする、背後から見た構図にする）",
         )
 
     base_image = _shot_frame_base(shot)

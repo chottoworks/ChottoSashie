@@ -608,7 +608,7 @@ function SetupPanel({
                     <label>既存ComfyUIフォルダ（main.pyのある場所）</label>
                     <input
                       className="vs-input"
-                      placeholder="例: C:\\AI\\ComfyUI"
+                      placeholder={"例: C:\\AI\\ComfyUI"}
                       value={comfyPath}
                       onChange={(e) => setComfyPath(e.target.value)}
                     />
@@ -617,7 +617,7 @@ function SetupPanel({
                     <label>既存ComfyUI用のPython</label>
                     <input
                       className="vs-input"
-                      placeholder="例: C:\\AI\\PythonEnv\\Scripts\\python.exe"
+                      placeholder={"例: C:\\AI\\PythonEnv\\Scripts\\python.exe"}
                       value={pythonPath}
                       onChange={(e) => setPythonPath(e.target.value)}
                     />
@@ -3554,7 +3554,7 @@ function ShotCard({
           <input
             className="vs-input"
             value={fields.composition_prompt ?? ""}
-            placeholder="例: バストアップに寄る、背後から見た構図にする"
+            placeholder="例: バストアップにする、背後から見た構図にする"
             onChange={(e) => setFields({ ...fields, composition_prompt: e.target.value })}
             onBlur={() => save({ composition_prompt: fields.composition_prompt ?? "" })}
           />
@@ -3645,7 +3645,7 @@ function ShotCard({
           <textarea
             className="vs-textarea"
             value={fields.note ?? ""}
-            placeholder="例: 主人公が振り向くまでの間をもう少し長く"
+            placeholder="例: あとで撮り直す"
             onChange={(e) => setFields({ ...fields, note: e.target.value })}
             onBlur={() => save({ note: fields.note ?? "" })}
           />
@@ -4736,7 +4736,7 @@ export function App() {
                   className="vs-input"
                   value={style}
                   onChange={(e) => setStyle(e.target.value)}
-                  placeholder="例：落ち着いた色合い、やわらかな光、繊細な描き込み"
+                  placeholder="例: 落ち着いた色合い、やわらかな光、繊細な描き込み"
                 />
               </div>
               <div className="vs-row vs-project-actions">
