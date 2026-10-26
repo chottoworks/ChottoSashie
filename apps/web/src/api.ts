@@ -409,7 +409,7 @@ export interface Shot {
   ambience_prompt: string;
   /** 劇伴（H3の non_diegetic_music）。空なら N/A を送る。 */
   music_prompt: string;
-  /** 構図・カメラの変更指示。起点フレームを作り直すときに使う。 */
+  /** 起点の構図の指示。起点・着地の絵を作り直すときだけ使い、動画の文には入らない。 */
   composition_prompt: string;
   timeline_mode: TimelineMode;
   /** 利用者の覚え書き。生成に使う文には入らない。 */

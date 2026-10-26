@@ -3550,7 +3550,7 @@ function ShotCard({
 
         {/* --- 起点と構図 --- */}
         <div className="vs-field">
-          <label>構図・カメラの変更</label>
+          <label>起点の構図</label>
           <input
             className="vs-input"
             value={fields.composition_prompt ?? ""}
@@ -3559,7 +3559,7 @@ function ShotCard({
             onBlur={() => save({ composition_prompt: fields.composition_prompt ?? "" })}
           />
           <div className="vs-muted">
-            空のままなら、前のカットの続きからそのまま始まります。指定すると、その1枚を作り直してから動かします。
+            このカットの最初の1枚を、構図を変えて作り直すための指示です。書いただけでは使われず、「起点を作り直す」を押したときに作り直します。カットの中でカメラを動かしたいときは、動き・カメラワークの指示（ビートがあるときは各ビートの欄）に書いてください。
           </div>
           <div className="vs-row">
             <button
@@ -3665,13 +3665,13 @@ function ShotCard({
         {shot.beats.length === 0 && (
           <>
             <div className="vs-field">
-              <label>動きの指示</label>
+              <label>動き・カメラワークの指示</label>
               <textarea
                 ref={motionRef}
                 className="vs-textarea"
                 disabled={locked}
                 value={fields.motion_prompt ?? ""}
-                placeholder="例: ゆっくり振り返る、髪が風に揺れる"
+                placeholder="例: ゆっくり振り返る。カメラは顔へゆっくり寄る"
                 onChange={(e) => setFields({ ...fields, motion_prompt: e.target.value })}
                 onBlur={() => save({ motion_prompt: fields.motion_prompt ?? "" })}
               />
@@ -3755,7 +3755,7 @@ function ShotCard({
                     className="vs-input"
                     disabled={locked}
                     defaultValue={beat.motion_prompt}
-                    placeholder="この区間の動き"
+                    placeholder="この区間の動き・カメラワーク"
                     onBlur={(e) => void (async () => {
                       if (e.target.value === beat.motion_prompt) return;
                       try {
@@ -3827,7 +3827,7 @@ function ShotCard({
               style={{ flex: 1 }}
               disabled={locked}
               value={beatDraft.motion_prompt}
-              placeholder="足すビートの動き"
+              placeholder="足すビートの動き・カメラワーク"
               onChange={(e) => setBeatDraft({ ...beatDraft, motion_prompt: e.target.value })}
             />
             <button

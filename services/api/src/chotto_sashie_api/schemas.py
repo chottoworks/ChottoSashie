@@ -673,7 +673,7 @@ class ShotFrameRequest(BaseModel):
 
     base_url: str | None = Field(default=None, max_length=500)
     target: ShotFrameTarget = ShotFrameTarget.START
-    # 構図・カメラの変更指示。未指定ならカットに保存された composition_prompt を使う。
+    # 起点の構図の指示。未指定ならカットに保存された composition_prompt を使う。
     composition_prompt: str | None = Field(default=None, max_length=2000)
     seed: int | None = Field(default=None, ge=0)
     width: int = Field(default=1280, ge=256, le=2048)
