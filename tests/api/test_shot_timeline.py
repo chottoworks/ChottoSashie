@@ -467,6 +467,44 @@ def test_single_mode_labels_beats_with_time_ranges(client: TestClient, fake_comf
     assert "Second 3\u20136: Beat 2." in prompt
 
 
+def test_first_beat_keeps_the_shot_directions_as_its_own_first_beat(client: TestClient) -> None:
+    """カット全体の指示はビートが無いときだけ使う。ビートを足しても、書いた動きを失わない。"""
+    still_image_id = _still_image(client)
+    [hana] = _people(client, still_image_id, {"name": "ハナ"})
+    shot_id = client.post(
+        f"/api/v1/still-images/{still_image_id}/shots",
+        json={
+            "motion_prompt": "ゆっくり振り返る",
+            "speech_lines": [_line(hana, "待って")],
+            "duration_seconds": 4.0,
+        },
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/shots/{shot_id}/beats",
+        json={"duration_seconds": 3.0, "motion_prompt": "歩き出す"},
+    )
+
+    assert response.status_code == 201, response.text
+    shot = client.get(f"/api/v1/shots/{shot_id}").json()
+    assert [beat["motion_prompt"] for beat in shot["beats"]] == ["ゆっくり振り返る", "歩き出す"]
+    assert [beat["duration_seconds"] for beat in shot["beats"]] == [4.0, 3.0]
+    assert [line["text"] for line in shot["beats"][0]["speech_lines"]] == ["待って"]
+    # 同じ指示を2か所に持たない（ビートを全部消したときに古い指示が蘇らない）。
+    assert shot["motion_prompt"] == ""
+    assert shot["speech_lines"] == []
+    assert shot["total_seconds"] == 7.0
+
+
+def test_first_beat_on_an_empty_shot_adds_only_that_beat(client: TestClient) -> None:
+    still_image_id = _still_image(client)
+    shot_id = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+
+    client.post(f"/api/v1/shots/{shot_id}/beats", json={"duration_seconds": 3.0, "motion_prompt": "x"})
+
+    assert [beat["motion_prompt"] for beat in client.get(f"/api/v1/shots/{shot_id}/beats").json()] == ["x"]
+
+
 def test_deleting_a_beat_renumbers_the_rest(client: TestClient) -> None:
     still_image_id = _still_image(client)
     shot_id = _shot_with_beats(client, still_image_id, [1.0, 2.0, 3.0])

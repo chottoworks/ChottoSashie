@@ -3311,6 +3311,14 @@ function ShotCard({
   // 文を直接書き直している間は、その文のもとになる指示を変えさせない。
   const locked = shot.prompt_edit_mode;
   const motionRef = useRef<HTMLTextAreaElement>(null);
+  // カットの指示の保存は順に送る。ビートを足すとカット全体の動きはビートへ移るので、
+  // 書いた直後に足すときは、その保存を済ませてから足す（追い越すと、移した後に書き戻される）。
+  const pendingSave = useRef<Promise<void>>(Promise.resolve());
+
+  // カット全体の動きは、ビートを足すとサーバー側でビートへ移る。手元の値も合わせる。
+  useEffect(() => {
+    setFields((current) => ({ ...current, motion_prompt: shot.motion_prompt }));
+  }, [shot.motion_prompt]);
 
   // 追加した直後だけ。読み込み直しでは移さない（書いている途中の欄から飛ばさない）。
   useEffect(() => {
@@ -3336,17 +3344,19 @@ function ShotCard({
     return () => {
       cancelled = true;
     };
-  }, [shot.id, shot.updated_at, engine]);
+    // ビートや話す人を変えても、カット自体の更新時刻は変わらない。文が古くなったかで読み直す。
+  }, [shot.id, shot.updated_at, shot.prompt_is_stale, engine]);
 
-  const save = (patch: api.ShotFields) =>
-    void (async () => {
+  const save = (patch: api.ShotFields) => {
+    pendingSave.current = pendingSave.current.then(async () => {
       try {
         await api.updateShot(shot.id, patch);
         await reload();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
-    })();
+    });
+  };
 
   const saveBeatLines = async (beatId: string, lines: api.ShotSpeechLine[]) => {
     try {
@@ -3361,6 +3371,7 @@ function ShotCard({
   const preparePrompt = () =>
     void runner.run(
       async () => {
+        await pendingSave.current;
         const r = await api.prepareShotPrompt(shot.id, engine);
         return { job_id: r.job_id };
       },
@@ -3824,6 +3835,7 @@ function ShotCard({
               disabled={busy || locked}
               onClick={() => void (async () => {
                 try {
+                  await pendingSave.current;
                   await api.createShotBeat(shot.id, beatDraft);
                   setBeatDraft({ duration_seconds: 3, motion_prompt: "" });
                   await reload();
@@ -3872,6 +3884,7 @@ function ShotCard({
           onClick={() =>
             void runner.run(
               async () => {
+                await pendingSave.current;
                 const r = await api.generateShotVideo(shot.id, {
                   continue_from_previous: true,
                   engine,

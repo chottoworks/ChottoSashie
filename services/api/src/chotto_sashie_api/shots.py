@@ -362,6 +362,39 @@ def _replace_speech_lines(
         )
 
 
+def _move_shot_directions_into_beat(connection: Connection, shot: ShotRead, timestamp: str) -> None:
+    """カット全体の動きとセリフを、1つ目のビートへ移す。
+
+    カット全体の指示はビートが無いときだけ使う。ビートを足したときにそのまま置いておくと、
+    画面からも生成に使う文からも消え、書いた動きが黙って失われる。尺はカットの尺を引き継ぎ、
+    移した後のカット全体の指示は空にする（同じ指示を2か所に持たない）。
+    """
+    has_lines = bool(shot.speech_lines)
+    if not shot.motion_prompt.strip() and not has_lines:
+        return
+    beat_id = str(uuid4())
+    connection.execute(
+        """
+        INSERT INTO shot_beats(
+            id, shot_id, ordinal, duration_seconds, motion_prompt, created_at, updated_at
+        ) VALUES (?, ?, 1, ?, ?, ?, ?)
+        """,
+        (beat_id, shot.id, shot.duration_seconds, shot.motion_prompt, timestamp, timestamp),
+    )
+    if has_lines:
+        connection.execute(
+            """
+            UPDATE shot_speech_lines SET beat_id = ?, updated_at = ?
+            WHERE shot_id = ? AND beat_id IS NULL
+            """,
+            (beat_id, timestamp, shot.id),
+        )
+    connection.execute(
+        "UPDATE shots SET motion_prompt = '', updated_at = ? WHERE id = ?",
+        (timestamp, shot.id),
+    )
+
+
 class ShotRepository:
     def __init__(self, database: Database):
         self.database = database
@@ -692,11 +725,13 @@ class ShotBeatRepository:
             )
 
     def create(self, shot_id: str, request: ShotBeatCreate) -> ShotBeatRead:
-        ShotRepository(self.database).get(shot_id)
+        shot = ShotRepository(self.database).get(shot_id)
         self._ensure_unlocked(shot_id)
         beat_id = str(uuid4())
         timestamp = _now()
         with self.database.connect() as connection:
+            if not shot.beats:
+                _move_shot_directions_into_beat(connection, shot, timestamp)
             row = connection.execute(
                 "SELECT COALESCE(MAX(ordinal), 0) + 1 AS next FROM shot_beats WHERE shot_id = ?",
                 (shot_id,),
