@@ -235,6 +235,12 @@ def export_frame_size(sizes: list[tuple[int, int]]) -> tuple[int, int]:
     return width + width % 2, height + height % 2
 
 
+# 書き出しの画質（x264 の CRF）。ComfyUI の SaveVideo はカット動画を CRF 18 で書くので、
+# 書き出しも同じ細かさで作り直す。指定しないと x264 の既定（23）になり、カットより粗く
+# 圧縮し直して、模様や髪の筋などの細部が失われる。
+EXPORT_CRF = 18
+
+
 def concat_videos(ffmpeg_path: str, inputs: list[Path], output: Path, fps: float) -> bool:
     """入力動画群を連結して1本の mp4 を書き出し、音声を残せたかを返す。
 
@@ -289,6 +295,8 @@ def concat_videos(ffmpeg_path: str, inputs: list[Path], output: Path, fps: float
         str(fps),
         "-c:v",
         "libx264",
+        "-crf",
+        str(EXPORT_CRF),
         "-pix_fmt",
         "yuv420p",
         str(output),

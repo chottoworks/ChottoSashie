@@ -441,6 +441,19 @@ def test_cuts_of_different_sizes_are_joined_with_bars(tmp_path: Path) -> None:
 
 
 @needs_ffmpeg
+def test_export_is_encoded_as_finely_as_the_cuts(tmp_path: Path) -> None:
+    """カット動画（ComfyUI の SaveVideo）と同じ CRF 18 で作り直す。x264 は使った設定を
+    ファイルの中に書き残すので、それを読んで確かめる。"""
+    cut = tmp_path / "cut.mp4"
+    _real_ffmpeg("-f", "lavfi", "-i", "testsrc=s=320x180:r=24:d=0.5", "-c:v", "mpeg4", str(cut))
+    output = tmp_path / "out.mp4"
+
+    concat_videos(_FFMPEG, [cut], output, 24.0)
+
+    assert b"crf=18.0" in output.read_bytes()
+
+
+@needs_ffmpeg
 def test_an_unreadable_cut_is_reported_by_its_position(tmp_path: Path) -> None:
     good = tmp_path / "good.webp"
     frames = [Image.new("RGB", (64, 64)) for _ in range(2)]
