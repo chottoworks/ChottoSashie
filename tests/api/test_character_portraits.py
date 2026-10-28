@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from chotto_sashie_shared.jobs import JobRepository
-from chotto_sashie_api import main
+from chotto_sashie_api import characters, main
 from chotto_sashie_api.database import Database
 
 _RED = (255, 0, 0)
@@ -90,6 +90,26 @@ def test_chosen_range_is_cut_out_and_the_source_stays_whole(client: TestClient) 
     assert cropped.getpixel((20, 20)) == _BLUE
     # 範囲を決める画面には、切る前の全体を出す。
     assert _image(client, f"/api/v1/characters/{character_id}/portrait/source").size == (40, 80)
+
+
+
+def test_each_change_moves_the_portrait_version_even_within_the_same_instant(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """続けて変えると時刻は同じ値になりうる。それでも変えるたびに一覧の画像URLが変わる。"""
+    monkeypatch.setattr(characters, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    character_id = _character(client)
+    versions = []
+    for change in (
+        lambda: _upload_portrait(client, character_id, _tall_png(), "image/png"),
+        lambda: _crop(client, character_id, _BOTTOM_HALF),
+        lambda: _crop(client, character_id, None),
+        lambda: _upload_portrait(client, character_id, _tall_png(), "image/png"),
+    ):
+        change()
+        versions.append(client.get(f"/api/v1/characters/{character_id}").json()["portrait_version"])
+
+    assert len(set(versions)) == len(versions)
 
 
 def test_clearing_the_range_shows_the_whole_image_again(client: TestClient) -> None:

@@ -17,7 +17,7 @@ from .translation import TRANSLATION_TABLE_DDL
 
 # DBの形の版。下の SCHEMA は常に最新の形を書き、新しく作るDBはこの版から始まる。
 # 形を変えるときは版を1つ上げ、前の版のDBを追いつかせる手順を `_MIGRATIONS` に足す。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS characters (
     portrait_source TEXT NOT NULL DEFAULT '',
     -- 代表写真のうち一覧に出す範囲（JSON。画像の幅・高さに対する割合）。空なら全体を出す。
     portrait_crop TEXT NOT NULL DEFAULT '',
+    -- 代表写真か範囲を変えるたびに1つ増やす。一覧の画像URLの版にする（時刻は続けて
+    -- 変えると同じ値になりうるので、版には使わない）。
+    portrait_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -289,10 +292,17 @@ def _add_asset_input_prompt(connection: sqlite3.Connection) -> None:
             )
 
 
+def _add_portrait_revision(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "ALTER TABLE characters ADD COLUMN portrait_revision INTEGER NOT NULL DEFAULT 0"
+    )
+
+
 # 版ごとの移行手順。キーの版へ上げるために、1つ前の版のDBへ行う変更。
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _add_portrait_crop,
     3: _add_asset_input_prompt,
+    4: _add_portrait_revision,
 }
 
 

@@ -54,9 +54,10 @@ def test_initialize_brings_a_version_1_database_up_to_date(tmp_path: Path) -> No
     """0.1.0 で作ったDB（版1）も、起動したときに今の形へ追いつき、中身は残る。"""
     database = Database(tmp_path / "video-api.sqlite3")
     database.initialize()
-    # 版1の形へ戻す（代表写真の範囲の列も、欄へ入れた文の列もまだ無い）。
+    # 版1の形へ戻す（代表写真の範囲・版の列も、欄へ入れた文の列もまだ無い）。
     with database.connect() as connection:
         connection.execute("ALTER TABLE characters DROP COLUMN portrait_crop")
+        connection.execute("ALTER TABLE characters DROP COLUMN portrait_revision")
         connection.execute("ALTER TABLE background_assets DROP COLUMN input_prompt")
         connection.execute("ALTER TABLE prop_assets DROP COLUMN input_prompt")
         connection.execute("UPDATE schema_meta SET value = '1' WHERE key = 'schema_version'")
@@ -77,11 +78,12 @@ def test_initialize_brings_a_version_1_database_up_to_date(tmp_path: Path) -> No
             "SELECT value FROM schema_meta WHERE key = 'schema_version'"
         ).fetchone()["value"]
         character = connection.execute(
-            "SELECT name, portrait_crop FROM characters WHERE id = 'c'"
+            "SELECT name, portrait_crop, portrait_revision FROM characters WHERE id = 'c'"
         ).fetchone()
     assert version == str(SCHEMA_VERSION)
     assert character["name"] == "人物"
     assert character["portrait_crop"] == ""
+    assert character["portrait_revision"] == 0
 
 
 def test_initialize_fills_the_typed_prompt_of_version_2_assets(tmp_path: Path) -> None:
@@ -95,6 +97,7 @@ def test_initialize_fills_the_typed_prompt_of_version_2_assets(tmp_path: Path) -
         "作品全体の画風: 淡い水彩"
     )
     with database.connect() as connection:
+        connection.execute("ALTER TABLE characters DROP COLUMN portrait_revision")
         connection.execute("ALTER TABLE background_assets DROP COLUMN input_prompt")
         connection.execute("ALTER TABLE prop_assets DROP COLUMN input_prompt")
         connection.execute("UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'")
