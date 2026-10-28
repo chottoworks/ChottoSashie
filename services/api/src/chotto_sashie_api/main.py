@@ -150,6 +150,7 @@ from .character_figures import (
     CharacterFigureRepository,
     FigureJobWording,
     figure_image_path,
+    figure_image_version,
     figures_dir,
     monitor_figure_image,
 )
@@ -1481,7 +1482,7 @@ def list_character_portrait_options(character_id: str) -> list[PortraitOption]:
                 # 立ち絵は置き換えられることがあるので、版を付けて古い画像を出さない。
                 url=(
                     f"/api/v1/character-figures/{figure.id}/image?v="
-                    f"{quote(figure.updated_at, safe='')}"
+                    f"{quote(figure_image_version(figure.image_path), safe='')}"
                 ),
                 selected=character.portrait_source == option_id,
             )
@@ -1580,6 +1581,7 @@ def _figure_read(
         is_default=figure.is_default,
         has_image=has_image,
         url=f"/api/v1/character-figures/{figure.id}/image" if has_image else None,
+        image_version=figure_image_version(figure.image_path) if has_image else "",
         instruction=figure.instruction,
         prop_asset_ids=figure.prop_asset_ids,
         source_figure_id=figure.source_figure_id,
@@ -2623,7 +2625,7 @@ def _still_image_character_read(
         figure_label=figure.label if figure is not None else "",
         figure_url=(
             f"/api/v1/character-figures/{figure.id}/image?v="
-            f"{quote(figure.updated_at, safe='')}"
+            f"{quote(figure_image_version(figure.image_path), safe='')}"
             if figure is not None
             else None
         ),

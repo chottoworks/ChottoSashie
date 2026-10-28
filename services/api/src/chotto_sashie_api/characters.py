@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlite3 import Row
 from uuid import uuid4
 
+from .character_figures import figure_image_version
 from .database import Database
 from .projects import ProjectRepository
 from .schemas import CharacterCreate, CharacterRead, CharacterUpdate, PortraitCrop
@@ -40,12 +41,10 @@ def _to_character(row: Row) -> CharacterRead:
     portrait_source = row["portrait_source"] if "portrait_source" in columns else ""
     portrait_crop = _parse_crop(row["portrait_crop"] if "portrait_crop" in columns else "")
     # 代表写真を決めていなければ既定の立ち絵が出る。既定の付け替えや立ち絵の置き換えでは
-    # 人物の版は変わらないので、出ている立ち絵の画像も版に含める。立ち絵の画像は
-    # 置き換えるたびに別の名前で書くので、ファイル名だけで見分けられる。
-    default_figure_image = (
+    # 人物の版は変わらないので、出ている立ち絵の画像の版も版に含める。
+    default_figure_version = figure_image_version(
         row["default_figure_image"] or "" if "default_figure_image" in columns else ""
     )
-    default_figure_version = Path(default_figure_image).name if default_figure_image else ""
     portrait_revision = row["portrait_revision"] if "portrait_revision" in columns else 0
     return CharacterRead(
         id=row["id"],

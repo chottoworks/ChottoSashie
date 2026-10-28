@@ -34,7 +34,7 @@ export function withChosenFigure(
     figure_is_default: !figureId,
     figure_label: figure?.label ?? "",
     // 立ち絵の画面と同じく、描き直すたびに変わる版をURLに付けて古い画像を出さないようにする。
-    figure_url: figure ? `${figure.url}?v=${encodeURIComponent(figure.updated_at)}` : null,
+    figure_url: figure ? `${figure.url}?v=${encodeURIComponent(figure.image_version)}` : null,
     has_figure: figure !== null,
   };
 }

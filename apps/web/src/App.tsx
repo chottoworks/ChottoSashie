@@ -1617,7 +1617,7 @@ function AssetsTab({
       .filter((asset) => asset.has_image);
     lightbox.openGallery(
       shown.map((asset) => ({
-        src: `${api.assetImageUrl(kind, asset.id)}?v=${encodeURIComponent(asset.updated_at)}`,
+        src: api.assetImageSrc(kind, asset),
         caption: asset.name,
       })),
       shown.findIndex((asset) => asset.id === assetId),
@@ -1645,7 +1645,7 @@ function AssetsTab({
                 // （idだけのURLでは、最初に作った1枚が出続ける）。
                 <img
                   className="vs-thumb vs-zoomable"
-                  src={`${api.assetImageUrl(kind, asset.id)}?v=${encodeURIComponent(asset.updated_at)}`}
+                  src={api.assetImageSrc(kind, asset)}
                   alt={asset.name}
                   style={{ marginTop: 8 }}
                   onClick={() => openAssetGallery(asset.id)}
@@ -1991,7 +1991,7 @@ function AssetsTab({
                   {base.has_image ? (
                     <img
                       className="vs-thumb"
-                      src={`${api.assetImageUrl(kind, base.id)}?v=${encodeURIComponent(base.updated_at)}`}
+                      src={api.assetImageSrc(kind, base)}
                       alt={base.name}
                     />
                   ) : (
@@ -2543,7 +2543,7 @@ function CompositionPicker({
           background.has_image ? (
             <img
               className="vs-thumb vs-picked-background"
-              src={`${api.assetImageUrl("background-assets", background.id)}?v=${encodeURIComponent(background.updated_at)}`}
+              src={api.assetImageSrc("background-assets", background)}
               alt={`背景「${background.name}」`}
             />
           ) : (
@@ -2635,7 +2635,7 @@ function StillImageCard({
       );
       try {
         const outcome = await api.saveFile(
-          api.stillImageUrl(stillImage.id),
+          api.stillImageSrc(stillImage),
           name,
           api.stillImageSaveAsPath(stillImage.id),
         );
@@ -2798,11 +2798,11 @@ function StillImageCard({
           {background?.has_image ? (
             <img
               className="vs-still-source-image"
-              src={`${api.assetImageUrl("background-assets", background.id)}?v=${encodeURIComponent(background.updated_at)}`}
+              src={api.assetImageSrc("background-assets", background)}
               alt={`背景「${background.name}」`}
               onClick={() =>
                 sourceLightbox.open(
-                  `${api.assetImageUrl("background-assets", background.id)}?v=${encodeURIComponent(background.updated_at)}`,
+                  api.assetImageSrc("background-assets", background),
                   `背景「${background.name}」`,
                 )
               }
@@ -2890,7 +2890,7 @@ function StillImageCard({
         <div className="vs-still-preview">
           {stillImage.has_image ? (
             <button className="vs-still-image" onClick={onEnlarge}>
-              <img src={`${api.stillImageUrl(stillImage.id)}?t=${stillImage.composition_job_id ?? ""}`} alt="合成した静止画" />
+              <img src={api.stillImageSrc(stillImage)} alt="合成した静止画" />
               <span className="vs-muted">クリックで拡大</span>
             </button>
           ) : (
@@ -3101,7 +3101,7 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
             const shown = stillImages.filter((item) => item.has_image);
             stillImageLightbox.openGallery(
               shown.map((item) => ({
-                src: `${api.stillImageUrl(item.id)}?t=${item.composition_job_id ?? ""}`,
+                src: api.stillImageSrc(item),
                 caption: `静止画 #${item.ordinal} ${item.name || "（無題）"}`,
               })),
               shown.findIndex((item) => item.id === stillImage.id),
@@ -3411,9 +3411,8 @@ function ShotCard({
     none: "まだありません",
   };
   const startFrameLabel = START_FRAME_LABELS[shot.start_frame_source];
-  const startFrameUrl =
-    `${api.shotStartFrameUrl(shot.id)}?source=${shot.start_frame_source}&t=${shot.updated_at}`;
-  const videoUrl = `${api.shotVideoUrl(shot.id)}?t=${shot.video_job_id ?? ""}`;
+  const startFrameUrl = api.shotStartFrameSrc(shot);
+  const videoUrl = api.shotVideoSrc(shot);
 
   return (
     <div className="vs-list-item" style={{ marginTop: 10 }}>
@@ -3780,15 +3779,15 @@ function ShotCard({
                     <button
                       className="vs-shot-video"
                       onClick={() => lightbox.open(
-                        `${api.shotBeatVideoUrl(beat.id)}?t=${shot.video_job_id ?? ""}`,
+                        api.shotBeatVideoSrc(shot, beat.id),
                         `カット #${shot.ordinal} のビート #${beat.ordinal}`,
                         beat.segment_video_format === "mp4" ? "video" : "image",
                       )}
                     >
                       {beat.segment_video_format === "mp4" ? (
-                        <video src={`${api.shotBeatVideoUrl(beat.id)}?t=${shot.video_job_id ?? ""}`} muted loop autoPlay playsInline />
+                        <video src={api.shotBeatVideoSrc(shot, beat.id)} muted loop autoPlay playsInline />
                       ) : (
-                        <img src={`${api.shotBeatVideoUrl(beat.id)}?t=${shot.video_job_id ?? ""}`} alt="この区間の動画" />
+                        <img src={api.shotBeatVideoSrc(shot, beat.id)} alt="この区間の動画" />
                       )}
                       <span className="vs-muted">この区間（クリックで拡大）</span>
                     </button>
@@ -4072,11 +4071,11 @@ function SceneCutsCard({
         <button
           className="vs-still-image vs-scene-start"
           onClick={() => lightbox.open(
-            `${api.stillImageUrl(stillImage.id)}?t=${stillImage.composition_job_id ?? ""}`,
+            api.stillImageSrc(stillImage),
             `静止画 #${stillImage.ordinal} ${stillImage.name || "（無題）"}`,
           )}
         >
-          <img src={`${api.stillImageUrl(stillImage.id)}?t=${stillImage.composition_job_id ?? ""}`} alt="このシーンの起点になる静止画" />
+          <img src={api.stillImageSrc(stillImage)} alt="このシーンの起点になる静止画" />
           <span className="vs-muted">このシーンの起点（クリックで拡大）</span>
         </button>
       ) : (

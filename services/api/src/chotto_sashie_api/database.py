@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS projects (
 -- セットアップモード（単一行、3方式）。
 {SETUP_CONFIG_TABLE_DDL}
 
+-- 画像・動画の版: ファイルは記録ごとに決まった場所へ上書きし、長くキャッシュさせて配る。
+-- 画面のURLには版を付けて前のものを出さないようにする。版はファイルを書くたびに1つ増やす
+-- 番号で持つ（更新時刻は続けて変えると同じ値になりうるので使わない。生成の仕事IDは
+-- 書く前に変わるので、前のファイルを新しい版で覚えさせてしまう）。
+--
 -- 人物1件。共有のプロフィール列に、このアプリ固有の代表写真を足した拡張版。
 -- プロフィール列は chotto_sashie_shared.character_studio と揃える（試験で確認する）。
 CREATE TABLE IF NOT EXISTS characters (
@@ -68,8 +73,7 @@ CREATE TABLE IF NOT EXISTS characters (
     portrait_source TEXT NOT NULL DEFAULT '',
     -- 代表写真のうち一覧に出す範囲（JSON。画像の幅・高さに対する割合）。空なら全体を出す。
     portrait_crop TEXT NOT NULL DEFAULT '',
-    -- 代表写真か範囲を変えるたびに1つ増やす。一覧の画像URLの版にする（時刻は続けて
-    -- 変えると同じ値になりうるので、版には使わない）。
+    -- 代表写真か範囲を変えるたびに1つ増やす。一覧の画像URLの版にする。
     portrait_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -109,6 +113,8 @@ CREATE TABLE IF NOT EXISTS background_assets (
     -- 元と何が違うのか（「夕方」「机に本」）。名前の括弧書きの元で、元の名前を変えたときに
     -- バリエーションの名前を付け直すのに使う（画面へは名前として出す）。
     variant_label TEXT NOT NULL DEFAULT '',
+    -- 画像を書くたびに1つ増やす（画像の版）。
+    image_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -128,6 +134,8 @@ CREATE TABLE IF NOT EXISTS prop_assets (
     -- 今の画像を作るときに、利用者が「生成プロンプト」欄へ入れた文。欄の初期値に出す。
     -- 画像をアップロードしたときや、背景のバリエーション（欄から作らない）では空。
     input_prompt TEXT NOT NULL DEFAULT '',
+    -- 画像を書くたびに1つ増やす（画像の版）。
+    image_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -147,6 +155,8 @@ CREATE TABLE IF NOT EXISTS still_images (
     character_ids_json TEXT NOT NULL DEFAULT '[]',
     composition_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
     image_path TEXT NOT NULL DEFAULT '',
+    -- 合成した画像を書くたびに1つ増やす（画像の版）。合成を始めた時点では増やさない。
+    image_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(project_id, ordinal)
@@ -195,8 +205,13 @@ CREATE TABLE IF NOT EXISTS shots (
     start_frame_image_path TEXT NOT NULL DEFAULT '',
     video_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
     output_video_path TEXT NOT NULL DEFAULT '',
+    -- 動画（ビートの区間動画を含む）を書き換えるたびに1つ増やす（動画の版）。
+    video_revision INTEGER NOT NULL DEFAULT 0,
     -- 生成した動画の最終フレーム。次カットの起点フレームに使う（連続性）。
     last_frame_image_path TEXT NOT NULL DEFAULT '',
+    -- 起点・終端・最終フレームのどれかを書き換えるたびに1つ増やす（フレームの版）。
+    -- このカットや次のカットの起点の画像URLの版に使う。
+    frame_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(still_image_id, ordinal)
@@ -292,17 +307,26 @@ def _add_asset_input_prompt(connection: sqlite3.Connection) -> None:
             )
 
 
-def _add_portrait_revision(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        "ALTER TABLE characters ADD COLUMN portrait_revision INTEGER NOT NULL DEFAULT 0"
-    )
+def _add_image_revisions(connection: sqlite3.Connection) -> None:
+    """画像の版の列を足す。前の版のDBの画像は、どれも版0から始める。"""
+    for table, column in (
+        ("characters", "portrait_revision"),
+        ("background_assets", "image_revision"),
+        ("prop_assets", "image_revision"),
+        ("still_images", "image_revision"),
+        ("shots", "frame_revision"),
+        ("shots", "video_revision"),
+    ):
+        connection.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 # 版ごとの移行手順。キーの版へ上げるために、1つ前の版のDBへ行う変更。
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _add_portrait_crop,
     3: _add_asset_input_prompt,
-    4: _add_portrait_revision,
+    4: _add_image_revisions,
 }
 
 

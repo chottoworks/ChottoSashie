@@ -630,6 +630,24 @@ def test_deleting_the_character_removes_unsaved_edits(
     assert not edit_path.exists()
 
 
+def test_replacing_a_figure_changes_its_image_version(
+    client: TestClient, fake_comfy: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """立ち絵の画像を置き換えたら版が変わる。見出しを変えただけでは変わらない。"""
+    _project_id, character_id = _character(client)
+    figure = _uploaded_figure(client, character_id)
+    before = figure["image_version"]
+    relabeled = client.patch(f"/api/v1/character-figures/{figure['id']}", json={"label": "制服"})
+    assert relabeled.json()["image_version"] == before
+    _edited_png(monkeypatch)
+    edit = _start_edit(client, figure["id"])["edit"]
+
+    saved = client.post(f"/api/v1/character-figure-edits/{edit['id']}/save", json={})
+
+    assert before
+    assert saved.json()["image_version"] != before
+
+
 def test_replacing_the_default_figure_changes_the_portrait_version(
     client: TestClient, fake_comfy: dict[str, list], monkeypatch: pytest.MonkeyPatch
 ) -> None:

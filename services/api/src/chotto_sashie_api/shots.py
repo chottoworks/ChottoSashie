@@ -56,7 +56,7 @@ def _now() -> str:
 
 def _with_readiness(database: Database, shot: ShotRead, row: Row) -> ShotRead:
     """「動画を生成できるか」と、できない理由を添える（UIはこれを表示するだけにする）。"""
-    from .readiness import shot_start_frame_source, shot_video_block_reason
+    from .readiness import resolve_shot_start_frame_version, shot_video_block_reason
 
     reason = shot_video_block_reason(database, shot)
     lines = _speech_lines_for(database, shot.id)
@@ -76,11 +76,13 @@ def _with_readiness(database: Database, shot: ShotRead, row: Row) -> ShotRead:
     stale = bool(stored) and not edit_mode and (
         row["resolved_prompt_signature"] != prompt_signature(resolved)
     )
+    start_frame_source, start_frame_version = resolve_shot_start_frame_version(database, shot)
     return resolved.model_copy(
         update={
             "can_generate_video": not reason,
             "video_blocked_reason": reason,
-            "start_frame_source": shot_start_frame_source(database, shot),
+            "start_frame_source": start_frame_source,
+            "start_frame_version": start_frame_version,
             "has_prompt": bool(stored),
             "prompt_is_stale": stale,
             "prompt_edit_mode": edit_mode,
@@ -183,6 +185,7 @@ def _to_shot(row: Row) -> ShotRead:
         video_job_id=row["video_job_id"],
         has_video=_exists(row["output_video_path"]),
         video_format=_video_format(row["output_video_path"]),
+        video_version=str(row["video_revision"]),
         has_last_frame=_exists(row["last_frame_image_path"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -538,14 +541,7 @@ class ShotRepository:
         return self.get(shot_id)
 
     def set_output_video(self, shot_id: str, video_path: Path) -> ShotRead:
-        with self.database.connect() as connection:
-            cursor = connection.execute(
-                "UPDATE shots SET output_video_path = ?, updated_at = ? WHERE id = ?",
-                (str(video_path), _now(), shot_id),
-            )
-            if cursor.rowcount != 1:
-                raise ShotNotFoundError(shot_id)
-        return self.get(shot_id)
+        return self._replace_file(shot_id, "output_video_path", video_path, "video_revision")
 
     def last_frame_path(self, shot_id: str) -> Path | None:
         with self.database.connect() as connection:
@@ -557,10 +553,33 @@ class ShotRepository:
         return Path(row["last_frame_image_path"]) if row["last_frame_image_path"] else None
 
     def set_last_frame(self, shot_id: str, image_path: Path) -> ShotRead:
+        return self._replace_file(shot_id, "last_frame_image_path", image_path, "frame_revision")
+
+    def frame_revision(self, shot_id: str) -> int:
+        """起点・終端・最終フレームを書き換えた回数（フレームの版）。"""
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT frame_revision FROM shots WHERE id = ?", (shot_id,)
+            ).fetchone()
+        if row is None:
+            raise ShotNotFoundError(shot_id)
+        return int(row["frame_revision"])
+
+    def _replace_file(
+        self, shot_id: str, column: str, path: Path | None, revision: str
+    ) -> ShotRead:
+        """書き出したファイルの道を付け替え、その種類の版（`revision` の列）を1つ増やす。
+
+        動画もフレームもカットごとに決まった場所へ上書きするので、道が同じでも中身は変わる。
+        """
         with self.database.connect() as connection:
             cursor = connection.execute(
-                "UPDATE shots SET last_frame_image_path = ?, updated_at = ? WHERE id = ?",
-                (str(image_path), _now(), shot_id),
+                f"""
+                UPDATE shots
+                SET {column} = ?, {revision} = {revision} + 1, updated_at = ?
+                WHERE id = ?
+                """,  # noqa: S608
+                (str(path) if path else "", _now(), shot_id),
             )
             if cursor.rowcount != 1:
                 raise ShotNotFoundError(shot_id)
@@ -575,26 +594,16 @@ class ShotRepository:
             raise ShotNotFoundError(shot_id)
         return Path(row[column]) if row[column] else None
 
-    def _set_path(self, shot_id: str, column: str, image_path: Path | None) -> ShotRead:
-        with self.database.connect() as connection:
-            cursor = connection.execute(
-                f"UPDATE shots SET {column} = ?, updated_at = ? WHERE id = ?",
-                (str(image_path) if image_path else "", _now(), shot_id),
-            )
-            if cursor.rowcount != 1:
-                raise ShotNotFoundError(shot_id)
-        return self.get(shot_id)
-
     def clear_output_video(self, shot_id: str) -> Path | None:
         """記録していた動画を外し、その場所を返す（ファイルは呼び出し側が片付ける）。"""
         previous = self._path(shot_id, "output_video_path")
-        self._set_path(shot_id, "output_video_path", None)
+        self._replace_file(shot_id, "output_video_path", None, "video_revision")
         return previous
 
     def clear_last_frame(self, shot_id: str) -> Path | None:
         """記録していた最終フレームを外し、その場所を返す。"""
         previous = self._path(shot_id, "last_frame_image_path")
-        self._set_path(shot_id, "last_frame_image_path", None)
+        self._replace_file(shot_id, "last_frame_image_path", None, "frame_revision")
         return previous
 
     def custom_start_frame_path(self, shot_id: str) -> Path | None:
@@ -602,14 +611,14 @@ class ShotRepository:
         return self._path(shot_id, "custom_start_frame_path")
 
     def set_custom_start_frame(self, shot_id: str, image_path: Path | None) -> ShotRead:
-        return self._set_path(shot_id, "custom_start_frame_path", image_path)
+        return self._replace_file(shot_id, "custom_start_frame_path", image_path, "frame_revision")
 
     def custom_end_frame_path(self, shot_id: str) -> Path | None:
         """終端の絵（MiniMax H3 の last_frame へ渡す）。無ければ None。"""
         return self._path(shot_id, "custom_end_frame_path")
 
     def set_custom_end_frame(self, shot_id: str, image_path: Path | None) -> ShotRead:
-        return self._set_path(shot_id, "custom_end_frame_path", image_path)
+        return self._replace_file(shot_id, "custom_end_frame_path", image_path, "frame_revision")
 
     # --- 生成に使う文 ---
 
@@ -874,7 +883,11 @@ class ShotBeatRepository:
     def set_segment(
         self, beat_id: str, video_path: Path, last_frame: Path | None
     ) -> ShotBeatRead:
-        """分割モードで作った区間動画と、その最終フレームを記録する。"""
+        """分割モードで作った区間動画と、その最終フレームを記録する。
+
+        区間動画もビートごとに決まった場所へ上書きするので、カットの動画の版を1つ増やす。
+        """
+        timestamp = _now()
         with self.database.connect() as connection:
             cursor = connection.execute(
                 """
@@ -882,8 +895,15 @@ class ShotBeatRepository:
                 SET segment_video_path = ?, last_frame_image_path = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (str(video_path), str(last_frame) if last_frame else "", _now(), beat_id),
+                (str(video_path), str(last_frame) if last_frame else "", timestamp, beat_id),
             )
             if cursor.rowcount != 1:
                 raise ShotBeatNotFoundError(beat_id)
+            connection.execute(
+                """
+                UPDATE shots SET video_revision = video_revision + 1, updated_at = ?
+                WHERE id = (SELECT shot_id FROM shot_beats WHERE id = ?)
+                """,
+                (timestamp, beat_id),
+            )
         return self.get(beat_id)

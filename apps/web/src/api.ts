@@ -47,6 +47,32 @@ export function shotStartFrameUrl(shotId: string): string {
 export function shotFrameUrl(shotId: string, target: ShotFrameTarget): string {
   return `${apiBaseUrl}/api/v1/shots/${shotId}/frame/${target}`;
 }
+
+// 画像・動画は記録ごとに決まった場所へ上書きされ、長くキャッシュされる。表示には
+// APIが返す版を付けたURLを使い、書き直された後に前のものを出さないようにする。
+function withVersion(url: string, version: string): string {
+  return `${url}?v=${encodeURIComponent(version)}`;
+}
+export function assetImageSrc(kind: AssetKind, asset: Asset): string {
+  return withVersion(assetImageUrl(kind, asset.id), asset.image_version);
+}
+export function stillImageSrc(stillImage: StillImage): string {
+  return withVersion(stillImageUrl(stillImage.id), stillImage.image_version);
+}
+export function shotStartFrameSrc(shot: Shot): string {
+  return withVersion(shotStartFrameUrl(shot.id), shot.start_frame_version);
+}
+export function shotVideoSrc(shot: Shot): string {
+  return withVersion(shotVideoUrl(shot.id), shot.video_version);
+}
+/** ビートの区間動画。区間を作り直すとカットの動画の版が変わる。 */
+export function shotBeatVideoSrc(shot: Shot, beatId: string): string {
+  return withVersion(shotBeatVideoUrl(beatId), shot.video_version);
+}
+export function characterFigureSrc(figure: CharacterFigure): string {
+  return withVersion(characterFigureUrl(figure.id), figure.image_version);
+}
+
 export function exportDownloadUrl(projectId: string): string {
   return `${apiBaseUrl}/api/v1/projects/${projectId}/export/download`;
 }
@@ -337,6 +363,8 @@ export interface Asset {
   category: string;
   description: string;
   has_image: boolean;
+  /** 画像URLに付ける版。画像を書くたびに変わる。 */
+  image_version: string;
   /** 今の画像を作るときに ComfyUI へ渡した指示文（作品の画風を足したもの）。 */
   source_prompt: string;
   /** 今の画像を作るときに「生成プロンプト」欄へ入れた文。アップロードやバリエーションでは空。 */
@@ -344,7 +372,6 @@ export interface Asset {
   /** 背景だけ: このバリエーションの元（自分が元なら null）。 */
   base_asset_id?: string | null;
   created_at: string;
-  /** 画像を作り直すたびに変わる。表示に使うURLをこれで分ける。 */
   updated_at: string;
 }
 export interface StillImage {
@@ -356,6 +383,8 @@ export interface StillImage {
   character_ids: string[];
   composition_job_id: string | null;
   has_image: boolean;
+  /** 画像URLに付ける版。合成した画像を書くたびに変わる（合成を始めた時点では変わらない）。 */
+  image_version: string;
   /** 合成できるか。できないときは理由を compose_blocked_reason に入れる。 */
   can_compose: boolean;
   compose_blocked_reason: string;
@@ -418,10 +447,14 @@ export interface Shot {
   has_start_frame: boolean;
   /** 次の生成でどこから始まるか。前のカットが未生成なら静止画へ戻る。 */
   start_frame_source: StartFrameSource;
+  /** 起点の画像URLに付ける版。起点の絵が書き直されるか、出どころが変わると変わる。 */
+  start_frame_version: string;
   has_custom_start_frame: boolean;
   has_custom_end_frame: boolean;
   video_job_id: string | null;
   has_video: boolean;
+  /** 動画URL（カットの動画とビートの区間動画）に付ける版。動画を書くたびに変わる。 */
+  video_version: string;
   has_last_frame: boolean;
   beats: ShotBeat[];
   /** 実際に生成へ渡す尺（ビートの合計、無ければ duration_seconds）。 */
@@ -894,6 +927,8 @@ export interface CharacterFigure {
   is_default: boolean;
   has_image: boolean;
   url: string | null;
+  /** 画像URLに付ける版。画像を置き換えるたびに変わる。 */
+  image_version: string;
   instruction: string;
   prop_asset_ids: string[];
   source_figure_id: string | null;

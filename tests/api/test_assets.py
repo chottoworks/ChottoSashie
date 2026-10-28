@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from chotto_sashie_shared.jobs import JobRepository
-from chotto_sashie_api import main
+from chotto_sashie_api import assets, main
 from chotto_sashie_api.database import Database
 
 # 1x1の透明PNG。
@@ -94,6 +94,30 @@ class TestAssetCrud:
         assert served.status_code == 200
         assert served.headers["content-type"] == "image/png"
         assert served.content == _TINY_PNG
+
+    def test_each_upload_moves_the_image_version_even_within_the_same_instant(
+        self,
+        client: TestClient,
+        project_id: str,
+        path_prefix: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """画像は同じ場所へ上書きする。時刻が同じでも、書くたびに画像URLの版が変わる。"""
+        monkeypatch.setattr(assets, "_now", lambda: "2026-01-01T00:00:00+00:00")
+        created = client.post(f"/api/v1/projects/{project_id}/{path_prefix}", json={"name": "机"})
+        asset_id = created.json()["id"]
+        versions = [created.json()["image_version"]]
+        for _ in range(2):
+            uploaded = client.post(
+                f"/api/v1/{path_prefix}/{asset_id}/image",
+                files={"file": ("reference.png", _TINY_PNG, "image/png")},
+            )
+            versions.append(uploaded.json()["image_version"])
+        # 名前を変えても画像は変わらないので、版はそのまま。
+        renamed = client.patch(f"/api/v1/{path_prefix}/{asset_id}", json={"name": "書斎机"})
+
+        assert len(set(versions)) == len(versions)
+        assert renamed.json()["image_version"] == versions[-1]
 
     def test_image_upload_rejects_unsupported_content_type(
         self, client: TestClient, project_id: str, path_prefix: str
