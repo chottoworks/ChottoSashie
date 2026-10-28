@@ -2351,55 +2351,36 @@ function CharactersTab({ projectId, propsRevision }: { projectId: string; propsR
 
 // ============================ 静止画 ============================
 
+const EMPTY_STILL_IMAGE_CHARACTER_SPEC: api.StillImageCharacterSpec = {
+  pose: "",
+  expression: "",
+  direction: "",
+  placement: "",
+  notes: "",
+};
+
 function StillImageCharacterPanel({
   character,
   info,
   figures,
-  onSaveSpec,
+  spec,
+  onSpecChange,
   onChooseFigure,
 }: {
   character: api.Character;
   info?: api.StillImageCharacter;
   /** この人物の立ち絵（出来上がっているものだけ）。 */
   figures: api.CharacterFigure[];
-  onSaveSpec: (spec: api.StillImageCharacterSpec) => Promise<void>;
+  /** 画面に出ている指定。保存は合成のときにまとめて行う。 */
+  spec: api.StillImageCharacterSpec;
+  onSpecChange: (spec: api.StillImageCharacterSpec) => void;
   /** 使う立ち絵を選び直す。空文字は「既定の立ち絵を使う」。 */
   onChooseFigure: (figureId: string) => Promise<void>;
 }) {
-  const empty: api.StillImageCharacterSpec = {
-    pose: "",
-    expression: "",
-    direction: "",
-    placement: "",
-    notes: "",
-  };
-  const [spec, setSpec] = useState<api.StillImageCharacterSpec>(info?.spec ?? empty);
   // 空文字は「既定の立ち絵を使う」。選び直すとすぐ info に反映されるので、ここでは持たない。
   const figureId = chosenFigureId(info);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lightbox = useLightbox();
-
-  // 保存済みの指定が変わったときだけ、書きかけの内容を置き換える。
-  // 立ち絵を選び直しただけで info は作り直されるので、そのたびに戻すと書きかけが消える。
-  const savedSpecKey = info ? JSON.stringify(info.spec) : "";
-  useEffect(() => {
-    if (info) setSpec(info.spec);
-    // savedSpecKey が変わったときだけ戻す。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedSpecKey]);
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await onSaveSpec(spec);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const chooseFigure = async (next: string) => {
     setError(null);
@@ -2457,29 +2438,26 @@ function StillImageCharacterPanel({
       <div className="vs-state-grid">
         <div>
           <label>ポーズ</label>
-          <input className="vs-input" value={spec.pose} onChange={(e) => setSpec({ ...spec, pose: e.target.value })} placeholder="例: 椅子に座って右手をあげる" />
+          <input className="vs-input" value={spec.pose} onChange={(e) => onSpecChange({ ...spec, pose: e.target.value })} placeholder="例: 椅子に座って右手をあげる" />
         </div>
         <div>
           <label>表情</label>
-          <input className="vs-input" value={spec.expression} onChange={(e) => setSpec({ ...spec, expression: e.target.value })} placeholder="例: 笑顔" />
+          <input className="vs-input" value={spec.expression} onChange={(e) => onSpecChange({ ...spec, expression: e.target.value })} placeholder="例: 笑顔" />
         </div>
         <div>
           <label>向き</label>
-          <input className="vs-input" value={spec.direction} onChange={(e) => setSpec({ ...spec, direction: e.target.value })} placeholder="例: 右向き" />
+          <input className="vs-input" value={spec.direction} onChange={(e) => onSpecChange({ ...spec, direction: e.target.value })} placeholder="例: 右向き" />
         </div>
         <div>
           <label>配置・位置</label>
-          <input className="vs-input" value={spec.placement} onChange={(e) => setSpec({ ...spec, placement: e.target.value })} placeholder="例: 画面の右寄り" />
+          <input className="vs-input" value={spec.placement} onChange={(e) => onSpecChange({ ...spec, placement: e.target.value })} placeholder="例: 画面の右寄り" />
         </div>
       </div>
       <div className="vs-state-field">
         <label>補足</label>
-        <input className="vs-input" value={spec.notes} onChange={(e) => setSpec({ ...spec, notes: e.target.value })} placeholder="上の項目に収まらない指定" />
+        <input className="vs-input" value={spec.notes} onChange={(e) => onSpecChange({ ...spec, notes: e.target.value })} placeholder="上の項目に収まらない指定" />
       </div>
       <div className="vs-state-actions">
-        <button className="vs-btn ghost" disabled={saving} onClick={() => void save()}>
-          {saving ? "保存中..." : "指定を保存"}
-        </button>
         <span className="vs-muted">
           空のままにすると、立ち絵の姿勢・表情・向きのまま合成します。
         </span>
@@ -2610,6 +2588,9 @@ function StillImageCard({
   maxCharacters: number | null;
 }) {
   const [charInfos, setCharInfos] = useState<api.StillImageCharacter[]>([]);
+  // 画面に出ている人物ごとの指定。合成するときにこの内容を保存し、その内容で合成する。
+  // 合成しなければ保存しない。
+  const [specDrafts, setSpecDrafts] = useState<Record<string, api.StillImageCharacterSpec>>({});
   // 人物ごとの立ち絵。選び直せるように、この静止画に出ている人物の分だけ読む。
   const [figuresByCharacter, setFiguresByCharacter] = useState<Record<string, api.CharacterFigure[]>>({});
   const [prompt, setPrompt] = useState("");
@@ -2700,37 +2681,38 @@ function StillImageCard({
     void reloadCharacters();
   }, [reloadCharacters]);
 
-  // 人物ごとの指定の保存は、1本の列で順に送る。指定と立ち絵は同じ記録に入るので、
-  // 追い越しがあると後から届いた古い内容で上書きされる。合成もこの列が空くのを待つ。
+  // 保存済みの指定が変わったときだけ、画面の指定を置き換える。
+  // 立ち絵を選び直しただけで charInfos は作り直されるので、そのたびに戻すと書きかけが消える。
+  const savedSpecsKey = JSON.stringify(charInfos.map((info) => [info.character_id, info.spec]));
+  useEffect(() => {
+    setSpecDrafts(Object.fromEntries(charInfos.map((info) => [info.character_id, info.spec])));
+    // savedSpecsKey が変わったときだけ戻す。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedSpecsKey]);
+
+  // 立ち絵の選び直しの保存は、1本の列で順に送る。追い越しがあると、後から届いた古い選択で
+  // 上書きされる。合成もこの列が空くのを待つ。
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   // 人物ごとに、立ち絵を何回選び直したか。古い選択への返事で画面を戻さないために使う。
   const figureChoiceCount = useRef<Record<string, number>>({});
 
-  const saveCharacter = (
-    characterId: string,
-    change: { spec?: api.StillImageCharacterSpec; figureId?: string },
-  ): Promise<void> => {
-    const count = figureChoiceCount.current[characterId] ?? 0;
+  /** 使う立ち絵を選び直す。画面はすぐ切り替え、保存は後ろで送る。 */
+  const chooseFigure = (characterId: string, figureId: string): Promise<void> => {
+    const count = (figureChoiceCount.current[characterId] ?? 0) + 1;
+    figureChoiceCount.current[characterId] = count;
+    const figures = figuresByCharacter[characterId] ?? [];
+    updateCharInfos((infos) =>
+      infos.map((info) =>
+        info.character_id === characterId ? withChosenFigure(info, figures, figureId) : info,
+      ),
+    );
     const task = saveQueue.current.then(async () => {
-      // 送る直前の内容を読む。画面の info は立ち絵だけ先に切り替えてあり、指定は保存済みのもの。
-      const current = charInfosRef.current.find((info) => info.character_id === characterId);
-      const spec = change.spec ?? current?.spec;
-      if (!spec) return;
-      const figureId = change.figureId ?? chosenFigureId(current);
       try {
-        const saved = await api.updateStillImageCharacter(
-          stillImage.id,
-          characterId,
-          spec,
-          figureId || null,
-        );
-        const latest = (figureChoiceCount.current[characterId] ?? 0) === count;
+        const saved = await api.chooseStillImageFigure(stillImage.id, characterId, figureId || null);
+        // あとから選び直していれば、画面はその選択のまま。
+        if ((figureChoiceCount.current[characterId] ?? 0) !== count) return;
         updateCharInfos((infos) =>
-          infos.map((info) => {
-            if (info.character_id !== characterId) return info;
-            // あとから選び直していれば、立ち絵はその選択のまま。指定だけ受け取る。
-            return latest ? saved : { ...info, spec: saved.spec };
-          }),
+          infos.map((info) => (info.character_id === characterId ? saved : info)),
         );
       } catch (e) {
         // 先に切り替えた画面を、保存されている内容に戻す。
@@ -2740,18 +2722,6 @@ function StillImageCard({
     });
     saveQueue.current = task.catch(() => undefined);
     return task;
-  };
-
-  /** 使う立ち絵を選び直す。画面はすぐ切り替え、保存は後ろで送る。 */
-  const chooseFigure = (characterId: string, figureId: string): Promise<void> => {
-    figureChoiceCount.current[characterId] = (figureChoiceCount.current[characterId] ?? 0) + 1;
-    const figures = figuresByCharacter[characterId] ?? [];
-    updateCharInfos((infos) =>
-      infos.map((info) =>
-        info.character_id === characterId ? withChosenFigure(info, figures, figureId) : info,
-      ),
-    );
-    return saveCharacter(characterId, { figureId });
   };
 
   const background = backgrounds.find((b) => b.id === stillImage.background_asset_id);
@@ -2952,7 +2922,17 @@ function StillImageCard({
                 async () => {
                   // 選び直した立ち絵の保存が届いてから合成する。届く前だと前の立ち絵で合成される。
                   await saveQueue.current;
-                  const r = await api.composeStillImage(stillImage.id, { prompt, quality });
+                  // 人物ごとの指定は、画面に出ている内容を合成と一緒に保存する。
+                  const characterSpecs = Object.fromEntries(
+                    Object.entries(specDrafts).filter(([id]) => stillImage.character_ids.includes(id)),
+                  );
+                  const r = await api.composeStillImage(stillImage.id, {
+                    prompt,
+                    quality,
+                    character_specs: characterSpecs,
+                  });
+                  // 保存された指定を読み直し、画面と保存済みの内容をそろえる。
+                  void reloadCharacters();
                   return { job_id: r.job_id };
                 },
                 onChanged,
@@ -2976,19 +2956,25 @@ function StillImageCard({
               <summary>人物ごとの指定（{stillImageChars.length}人）</summary>
               <p className="vs-muted vs-state-lead">
                 どの立ち絵を使うかと、姿勢・表情・向き・立ち位置をここで決めます。書かなければ
-                立ち絵のままの姿勢で合成します。衣装を変えたいときは素材作成の「登場人物」タブで
-                別の立ち絵を作ってください。
+                立ち絵のままの姿勢で合成します。ここに書いた内容は、静止画を合成したときに保存されます。
+                衣装を変えたいときは素材作成の「登場人物」タブで別の立ち絵を作ってください。
               </p>
-              {stillImageChars.map((char) => (
-                <StillImageCharacterPanel
-                  key={char.id}
-                  character={char}
-                  info={charInfos.find((info) => info.character_id === char.id)}
-                  figures={figuresByCharacter[char.id] ?? []}
-                  onSaveSpec={(spec) => saveCharacter(char.id, { spec })}
-                  onChooseFigure={(figureId) => chooseFigure(char.id, figureId)}
-                />
-              ))}
+              {stillImageChars.map((char) => {
+                const info = charInfos.find((item) => item.character_id === char.id);
+                return (
+                  <StillImageCharacterPanel
+                    key={char.id}
+                    character={char}
+                    info={info}
+                    figures={figuresByCharacter[char.id] ?? []}
+                    spec={specDrafts[char.id] ?? info?.spec ?? EMPTY_STILL_IMAGE_CHARACTER_SPEC}
+                    onSpecChange={(spec) =>
+                      setSpecDrafts((drafts) => ({ ...drafts, [char.id]: spec }))
+                    }
+                    onChooseFigure={(figureId) => chooseFigure(char.id, figureId)}
+                  />
+                );
+              })}
             </details>
           )}
         </div>

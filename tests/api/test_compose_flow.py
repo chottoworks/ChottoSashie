@@ -282,14 +282,15 @@ def test_compose_prompt_carries_the_pose_only_for_who_has_one(
         },
     ).json()["id"]
 
-    client.put(
-        f"/api/v1/still-images/{still_image_id}/characters/{first}",
-        json={"spec": {"pose": "椅子に座って右手をあげる", "expression": "笑顔"}},
-    )
-
     composed = client.post(
         f"/api/v1/still-images/{still_image_id}/compose",
-        json={"base_url": "http://127.0.0.1:8190", "seed": 11},
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "seed": 11,
+            "character_specs": {
+                first: {"pose": "椅子に座って右手をあげる", "expression": "笑顔"},
+            },
+        },
     )
     assert composed.status_code == 200
 
@@ -307,6 +308,171 @@ def test_compose_prompt_carries_the_pose_only_for_who_has_one(
         "the second person in image 2 keeps the pose, gesture, body orientation and "
         "facial expression from their own image." in prompt
     )
+
+
+def _two_person_still_image(client: TestClient) -> tuple[str, str, str]:
+    project_id = _project(client)
+    first = _character_with_image(client, project_id, name="花子")
+    second = _character_with_image(client, project_id, name="しおり")
+    still_image_id = client.post(
+        f"/api/v1/projects/{project_id}/still-images",
+        json={"name": "通り", "character_ids": [first, second]},
+    ).json()["id"]
+    return still_image_id, first, second
+
+
+def _saved_specs(client: TestClient, still_image_id: str) -> dict[str, dict]:
+    listed = client.get(f"/api/v1/still-images/{still_image_id}/characters").json()
+    return {item["character_id"]: item["spec"] for item in listed}
+
+
+def test_compose_saves_the_specs_on_screen_and_uses_them(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    """合成するときに画面の指定を保存し、その内容で合成する。画面と合成が食い違わない。"""
+    still_image_id, first, second = _two_person_still_image(client)
+    client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "seed": 1,
+            "character_specs": {
+                first: {"direction": "右向き"},
+                second: {"direction": "左向き"},
+            },
+        },
+    )
+
+    # 画面で書き換えた内容を、次の合成で送る。前に保存した内容ではなく、これが使われる。
+    composed = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "seed": 2,
+            "character_specs": {
+                first: {"direction": "右手前向き", "placement": "左側の道"},
+                second: {"direction": "左手前向き", "placement": "右側の道"},
+            },
+        },
+    )
+    assert composed.status_code == 200
+
+    prompt = fake_comfy["workflow"]["20"]["inputs"]["prompt"]
+    assert "the first person in image 1: 体の向きは右手前向き。" in prompt
+    assert "the second person in image 2: 体の向きは左手前向き。" in prompt
+    assert "右向き。" not in prompt
+
+    saved = _saved_specs(client, still_image_id)
+    assert saved[first]["direction"] == "右手前向き"
+    assert saved[first]["placement"] == "左側の道"
+    assert saved[second]["direction"] == "左手前向き"
+
+
+def test_compose_without_specs_keeps_the_saved_ones(client: TestClient, fake_comfy: dict) -> None:
+    """指定を送らなかった人物は、保存済みの指定のまま合成する。"""
+    still_image_id, first, second = _two_person_still_image(client)
+    client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "character_specs": {first: {"expression": "笑顔"}, second: {"expression": "真顔"}},
+        },
+    )
+
+    composed = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={"base_url": "http://127.0.0.1:8190", "character_specs": {first: {}}},
+    )
+    assert composed.status_code == 200
+
+    saved = _saved_specs(client, still_image_id)
+    assert saved[first]["expression"] == ""
+    assert saved[second]["expression"] == "真顔"
+    assert "the second person in image 2: 表情は真顔。" in fake_comfy["workflow"]["20"]["inputs"]["prompt"]
+
+
+def test_compose_rejects_a_person_not_in_the_still_image(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    """静止画に出ていない人物の指定は受け付けず、何も保存しない。"""
+    still_image_id, first, _second = _two_person_still_image(client)
+
+    response = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "character_specs": {first: {"pose": "走る"}, "not-in-this-image": {"pose": "座る"}},
+        },
+    )
+
+    assert response.status_code == 404
+    assert _saved_specs(client, still_image_id)[first]["pose"] == ""
+    assert fake_comfy["workflow"] is None
+
+
+def test_rejected_compose_does_not_save_the_specs(client: TestClient, fake_comfy: dict) -> None:
+    """合成を受け付けられないときは、指定も保存しない（合成しなければ保存しない）。"""
+    project_id = _project(client)
+    character_id = client.post(
+        f"/api/v1/projects/{project_id}/characters", json={"name": "立ち絵なし"}
+    ).json()["id"]
+    still_image_id = client.post(
+        f"/api/v1/projects/{project_id}/still-images",
+        json={"name": "未完成", "character_ids": [character_id]},
+    ).json()["id"]
+
+    response = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "character_specs": {character_id: {"pose": "走る"}},
+        },
+    )
+
+    assert response.status_code == 409
+    assert _saved_specs(client, still_image_id)[character_id]["pose"] == ""
+
+
+def test_compose_without_a_comfyui_address_does_not_save_the_specs(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    """ComfyUIの接続先が決まっておらず合成できないときも、指定は保存しない。"""
+    still_image_id, first, _second = _two_person_still_image(client)
+
+    response = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={"character_specs": {first: {"pose": "走る"}}},
+    )
+
+    assert response.status_code == 409
+    assert _saved_specs(client, still_image_id)[first]["pose"] == ""
+
+
+def test_choosing_a_figure_keeps_the_saved_spec(client: TestClient, fake_comfy: dict) -> None:
+    """立ち絵の選び直しだけを送っても、保存済みの指定は消えない。"""
+    project_id = _project(client)
+    character_id = _character_with_image(client, project_id)
+    coat = _add_figure(client, character_id, label="コート")
+    still_image_id = client.post(
+        f"/api/v1/projects/{project_id}/still-images",
+        json={"name": "冬の朝", "character_ids": [character_id]},
+    ).json()["id"]
+    client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "character_specs": {character_id: {"pose": "手を振る"}},
+        },
+    )
+
+    chosen = client.put(
+        f"/api/v1/still-images/{still_image_id}/characters/{character_id}",
+        json={"figure_id": coat["id"]},
+    )
+
+    assert chosen.status_code == 200
+    assert chosen.json()["figure_id"] == coat["id"]
+    assert chosen.json()["spec"]["pose"] == "手を振る"
 
 
 def test_default_figure_is_stable_when_created_at_the_same_moment(client: TestClient) -> None:

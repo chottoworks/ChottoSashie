@@ -396,6 +396,10 @@ class CompositionRequest(BaseModel):
     # 速さ優先（既定）は4ステップの高速LoRAで合成する。丁寧はそれを使わず、
     # ステップ数を増やして指示（姿勢の維持など）の反映を強める。時間はかかる。
     quality: CompositionQuality = CompositionQuality.FAST
+    # 画面に出ている人物ごとの指定（人物のID → 指定）。合成するときに保存し、その内容で
+    # 合成する。画面の指定と合成に使う指定が食い違わないよう、保存は合成と一緒にしか
+    # 行わない。含まれない人物は保存済みの指定のまま。
+    character_specs: dict[str, StillImageCharacterSpec] = Field(default_factory=dict)
 
 
 class VideoEnabledUpdate(BaseModel):
@@ -991,9 +995,14 @@ class StillImageCharacterSpec(BaseModel):
 
 
 class StillImageCharacterUpdate(BaseModel):
-    """指定と、使う立ち絵の選択。`figure_id` が空なら既定の立ち絵を使う。"""
+    """指定と、使う立ち絵の選択。`figure_id` が空なら既定の立ち絵を使う。
 
-    spec: StillImageCharacterSpec = Field(default_factory=StillImageCharacterSpec)
+    `spec` を省くと、保存済みの指定に触れない。画面は立ち絵の選び直しだけをここで
+    保存し、指定は合成のときに保存する（`CompositionRequest.character_specs`）。
+    立ち絵と一緒に指定を送ると、画面が持っている古い指定で上書きしてしまう。
+    """
+
+    spec: StillImageCharacterSpec | None = None
     figure_id: str | None = None
 
 

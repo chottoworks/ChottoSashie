@@ -2507,13 +2507,23 @@ async def compose_still_image(
         still_image = still_images.get(still_image_id)
     except StillImageNotFoundError as error:
         raise HTTPException(status_code=404, detail="静止画が見つかりません") from error
+    if not set(request.character_specs) <= set(still_image.character_ids):
+        raise HTTPException(status_code=404, detail="指定した人物はこの静止画に含まれていません")
 
     try:
-        sources = resolve_still_image_sources(database, still_image)
+        resolve_still_image_sources(database, still_image)
     except (CompositionError, CharacterNotFoundError, AssetNotFoundError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-
     base_url = _resolve_base_url(request.base_url)
+
+    # 画面の指定は、合成を受け付けられると分かってから保存する。合成しなければ保存しない。
+    chosen = StillImageCharacterRepository(database)
+    for character_id, spec in request.character_specs.items():
+        record = chosen.get(still_image_id, character_id)
+        chosen.upsert(still_image_id, character_id, spec, record.figure_id if record else None)
+    # 保存した指定から組み立て直す。合成に使う指定は、常に保存されている指定と同じになる。
+    sources = resolve_still_image_sources(database, still_image)
+
     seed = request.seed if request.seed is not None else randbelow(9_007_199_254_740_967)
     payload = {**request.model_dump(mode="json"), "still_image_id": still_image_id, "seed": seed}
 
@@ -2675,9 +2685,12 @@ def update_still_image_character(
         if figure.state != "completed" or not figure.image_path:
             raise HTTPException(status_code=409, detail="まだ出来ていない立ち絵は使えません")
 
-    StillImageCharacterRepository(database).upsert(
-        still_image_id, character_id, request.spec, figure_id
-    )
+    chosen = StillImageCharacterRepository(database)
+    spec = request.spec
+    if spec is None:
+        record = chosen.get(still_image_id, character_id)
+        spec = record.spec if record is not None else StillImageCharacterSpec()
+    chosen.upsert(still_image_id, character_id, spec, figure_id)
     return _still_image_character_read(still_image_id, character_id)
 
 

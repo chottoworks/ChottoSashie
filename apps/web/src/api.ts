@@ -1046,7 +1046,13 @@ export const createStillImage = (
 // quality: "fast" は4ステップで速く、"careful" は高速化LoRAを外して指示の反映を強める。
 export const composeStillImage = (
   stillImageId: string,
-  input: { prompt?: string; base_url?: string; quality?: "fast" | "careful" },
+  input: {
+    prompt?: string;
+    base_url?: string;
+    quality?: "fast" | "careful";
+    /** 画面に出ている人物ごとの指定。合成と一緒に保存され、その内容で合成する。 */
+    character_specs?: Record<string, StillImageCharacterSpec>;
+  },
 ) =>
   apiSend<{ still_image: StillImage; job_id: string }>(`/api/v1/still-images/${stillImageId}/compose`, "POST", input, "合成を開始できませんでした");
 export const updateStillImage = (
@@ -1429,16 +1435,16 @@ export const listStillImageCharacters = (stillImageId: string) =>
     "人物の指定を取得できませんでした",
   );
 
-/** 指定と、使う立ち絵を保存する。`figureId` を null にすると既定の立ち絵に戻る。 */
-export const updateStillImageCharacter = (
+/** 使う立ち絵を保存する。`figureId` を null にすると既定の立ち絵に戻る。
+ *  指定には触れない（指定は合成のときに `composeStillImage` で保存する）。 */
+export const chooseStillImageFigure = (
   stillImageId: string,
   characterId: string,
-  spec: StillImageCharacterSpec,
   figureId: string | null,
 ) =>
   apiSend<StillImageCharacter>(
     `/api/v1/still-images/${stillImageId}/characters/${characterId}`,
     "PUT",
-    { spec, figure_id: figureId },
-    "人物の指定を保存できませんでした",
+    { figure_id: figureId },
+    "使う立ち絵を保存できませんでした",
   );
