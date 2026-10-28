@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlite3 import Row
 from uuid import uuid4
 
+from .character_figures import figure_image_version
 from .database import Database
 from .projects import ProjectRepository
 from .schemas import CharacterCreate, CharacterRead, CharacterUpdate, PortraitCrop
@@ -39,11 +40,12 @@ def _to_character(row: Row) -> CharacterRead:
     figure_count = int(row["figure_count"]) if "figure_count" in columns else 0
     portrait_source = row["portrait_source"] if "portrait_source" in columns else ""
     portrait_crop = _parse_crop(row["portrait_crop"] if "portrait_crop" in columns else "")
-    # 代表写真を決めていなければ既定の立ち絵が出る。既定の付け替えや立ち絵の置き換えでも
-    # 人物の更新時刻は変わらないので、出ている立ち絵の版も版に含める。
-    default_figure_version = (
-        row["default_figure_version"] or "" if "default_figure_version" in columns else ""
+    # 代表写真を決めていなければ既定の立ち絵が出る。既定の付け替えや立ち絵の置き換えでは
+    # 人物の版は変わらないので、出ている立ち絵の画像の版も版に含める。
+    default_figure_version = figure_image_version(
+        row["default_figure_image"] or "" if "default_figure_image" in columns else ""
     )
+    portrait_revision = row["portrait_revision"] if "portrait_revision" in columns else 0
     return CharacterRead(
         id=row["id"],
         project_id=row["project_id"],
@@ -52,7 +54,7 @@ def _to_character(row: Row) -> CharacterRead:
         portrait_source=portrait_source,
         portrait_crop=portrait_crop,
         figure_count=figure_count,
-        portrait_version=f"{row['updated_at']}|{default_figure_version}",
+        portrait_version=f"{portrait_revision}|{default_figure_version}",
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -87,11 +89,11 @@ class CharacterRepository:
         (SELECT COUNT(*) FROM character_figures f
           WHERE f.character_id = c.id AND f.state = 'completed' AND f.image_path <> '')
         AS figure_count,
-        (SELECT f.id || ':' || f.updated_at FROM character_figures f
+        (SELECT f.image_path FROM character_figures f
           WHERE f.character_id = c.id AND f.state = 'completed' AND f.image_path <> ''
           ORDER BY f.is_default DESC, f.ordinal ASC, f.created_at ASC, f.rowid ASC
           LIMIT 1)
-        AS default_figure_version
+        AS default_figure_image
     """
 
     def get(self, character_id: str) -> CharacterRead:
@@ -161,7 +163,7 @@ class CharacterRepository:
                 """
                 UPDATE characters
                 SET portrait_image_path = ?, portrait_source = ?, portrait_crop = '',
-                    updated_at = ?
+                    portrait_revision = portrait_revision + 1, updated_at = ?
                 WHERE id = ?
                 """,
                 (str(image_path) if image_path else "", source, _now(), character_id),
@@ -183,7 +185,11 @@ class CharacterRepository:
         value = crop.model_dump_json() if crop else ""
         with self.database.connect() as connection:
             cursor = connection.execute(
-                "UPDATE characters SET portrait_crop = ?, updated_at = ? WHERE id = ?",
+                """
+                UPDATE characters
+                SET portrait_crop = ?, portrait_revision = portrait_revision + 1, updated_at = ?
+                WHERE id = ?
+                """,
                 (value, _now(), character_id),
             )
             if cursor.rowcount != 1:

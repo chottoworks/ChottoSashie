@@ -61,6 +61,8 @@ class AssetRead(BaseModel):
     category: str
     description: str
     has_image: bool
+    # 画像URLに付ける版。画像を書くたびに変わる。
+    image_version: str = ""
     # 今の画像を作るときに ComfyUI へ渡した指示文（作品の画風を足したもの）。
     source_prompt: str
     # 今の画像を作るときに「生成プロンプト」欄へ入れた文。欄の初期値に使う。
@@ -282,6 +284,8 @@ class CharacterFigureRead(BaseModel):
     is_default: bool = False
     has_image: bool = False
     url: str | None = None
+    # 画像URLに付ける版。画像を置き換えるたびに変わる。
+    image_version: str = ""
     instruction: str = ""
     prop_asset_ids: list[str] = Field(default_factory=list)
     source_figure_id: str | None = None
@@ -356,6 +360,8 @@ class StillImageRead(BaseModel):
     character_ids: list[str]
     composition_job_id: str | None
     has_image: bool
+    # 画像URLに付ける版。合成した画像を書くたびに変わる。
+    image_version: str = ""
     # 実行できない操作は押せないようにするための判定と、その理由。
     can_compose: bool = True
     compose_blocked_reason: str = ""
@@ -525,11 +531,16 @@ class ShotRead(BaseModel):
     has_start_frame: bool
     # 次の生成でどこから始まるか（前カットが未生成なら静止画に戻る、を先に見せる）。
     start_frame_source: StartFrameSource = "none"
+    # 起点の画像URLに付ける版。起点の絵が書き直されるか、出どころが変わると変わる。
+    start_frame_version: str = ""
     # 構図変更で作った起点フレーム／終端フレームがあるか。
     has_custom_start_frame: bool = False
     has_custom_end_frame: bool = False
     video_job_id: str | None
     has_video: bool
+    # 動画URL（カットの動画とビートの区間動画）に付ける版。動画を書くたびに変わる。
+    # 生成を始めた時点では変えない（前の動画を新しい版で覚えさせない）。
+    video_version: str = ""
     has_last_frame: bool
     beats: list[ShotBeatRead] = Field(default_factory=list)
     # 実際に生成へ渡す尺（ビートの合計、無ければ duration_seconds）。

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from chotto_sashie_shared.jobs import JobRepository
-from chotto_sashie_api import main
+from chotto_sashie_api import main, shots, still_images
 from chotto_sashie_api.database import Database
 from chotto_sashie_api.still_images import StillImageRepository
 
@@ -108,6 +108,49 @@ def test_second_shot_starts_from_first_shot_last_frame(client: TestClient, fake_
     with Image.open(io.BytesIO(uploaded)) as image:
         assert image.convert("RGB").getpixel((0, 0)) == _LAST_COLOR
     assert client.get(f"/api/v1/shots/{shot2}").json()["has_start_frame"] is True
+
+
+def test_start_frame_version_follows_the_picture_it_points_to(
+    client: TestClient, fake_comfy: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """起点の絵は他の記録が同じ場所へ書き直す。時刻が同じでも、書き直せば起点の版が変わる。"""
+    for module in (shots, still_images):
+        monkeypatch.setattr(module, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    still_image_id = _still_image_with_image(client)
+    shot1 = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+    shot2 = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+
+    def version(shot_id: str) -> str:
+        return client.get(f"/api/v1/shots/{shot_id}").json()["start_frame_version"]
+
+    # カット1の起点は静止画。合成し直すと、同じ場所へ書いても版が変わる。
+    from_still = version(shot1)
+    StillImageRepository(main.database).set_image(
+        still_image_id, main._STILL_IMAGE_ROOT / f"{still_image_id}.png"
+    )
+    assert version(shot1) != from_still
+
+    # カット2の起点はカット1の最終フレーム。カット1を作り直すと版が変わる。
+    _generate(client, shot1)
+    from_previous = version(shot2)
+    _generate(client, shot1)
+    assert version(shot2) != from_previous
+
+
+
+def test_regenerating_a_video_moves_its_version_even_within_the_same_instant(
+    client: TestClient, fake_comfy: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """動画は同じ場所へ上書きする。時刻が同じでも、作り直すたびに動画URLの版が変わる。"""
+    monkeypatch.setattr(shots, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    still_image_id = _still_image_with_image(client)
+    shot_id = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+    versions = [client.get(f"/api/v1/shots/{shot_id}").json()["video_version"]]
+    for _ in range(2):
+        _generate(client, shot_id)
+        versions.append(client.get(f"/api/v1/shots/{shot_id}").json()["video_version"])
+
+    assert len(set(versions)) == len(versions)
 
 
 def test_continue_disabled_falls_back_to_still_image(client: TestClient, fake_comfy: dict) -> None:

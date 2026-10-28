@@ -37,6 +37,7 @@ def _to_asset(row: Row) -> AssetRead:
         category=row["category"],
         description=row["description"],
         has_image=bool(row["image_path"]),
+        image_version=str(row["image_revision"]),
         source_prompt=row["source_prompt"],
         input_prompt=row["input_prompt"],
         # 背景だけが持つ列。小物のテーブルには無いので、あるときだけ読む。
@@ -213,7 +214,8 @@ class AssetRepository:
             connection.execute(
                 f"""
                 UPDATE {self.table}
-                SET image_path = ?, source_prompt = ?, input_prompt = ?, updated_at = ?
+                SET image_path = ?, source_prompt = ?, input_prompt = ?,
+                    image_revision = image_revision + 1, updated_at = ?
                 WHERE id = ?
                 """,
                 (str(image_path), source_prompt, input_prompt, timestamp, asset_id),

@@ -26,7 +26,34 @@ def still_image_compose_block_reason(database, still_image) -> str:  # noqa: ANN
 
 
 def resolve_shot_start_frame(database, shot, *, continue_from_previous: bool = True):  # noqa: ANN001, ANN201
-    """このカットの起点を「出どころ」と「実体」の組で返す。
+    """このカットの起点を「出どころ」と「実体」の組で返す。"""
+    source, _owner_id, image_path = _resolve_start_frame_owner(
+        database, shot, continue_from_previous=continue_from_previous
+    )
+    return source, image_path
+
+
+def resolve_shot_start_frame_version(database, shot) -> tuple[str, str]:  # noqa: ANN001
+    """このカットの起点の「出どころ」と、その画像URLに付ける版を返す。
+
+    起点は他の記録（前のカット・静止画）の絵を指すことがあり、その絵が書き直されても
+    このカットの記録は変わらない。版は、絵を持つ記録とその記録の画像の版から作る。
+    """
+    from .shots import ShotRepository
+    from .still_images import StillImageRepository
+
+    source, owner_id, _image_path = _resolve_start_frame_owner(database, shot)
+    if source in ("custom", "previous"):
+        revision = str(ShotRepository(database).frame_revision(owner_id))
+    elif source == "still_image":
+        revision = StillImageRepository(database).get(owner_id).image_version
+    else:
+        return source, ""
+    return source, f"{source}:{owner_id}:{revision}"
+
+
+def _resolve_start_frame_owner(database, shot, *, continue_from_previous: bool = True):  # noqa: ANN001, ANN202
+    """起点の「出どころ」「その絵を持つ記録のID」「実体」を返す。
 
     優先順位:
       1. 構図変更で作った起点フレーム
@@ -43,20 +70,20 @@ def resolve_shot_start_frame(database, shot, *, continue_from_previous: bool = T
     shots = ShotRepository(database)
     custom = shots.custom_start_frame_path(shot.id)
     if custom is not None and custom.is_file():
-        return "custom", custom
+        return "custom", shot.id, custom
     if continue_from_previous:
         previous = shots.previous_shot(shot.still_image_id, shot.ordinal)
         if previous is not None:
             last_frame = shots.last_frame_path(previous.id)
             if last_frame is not None and last_frame.is_file():
-                return "previous", last_frame
+                return "previous", previous.id, last_frame
     try:
         still_image = StillImageRepository(database).image_path(shot.still_image_id)
     except StillImageNotFoundError:
-        return "none", None
+        return "none", "", None
     if still_image is not None and still_image.is_file():
-        return "still_image", still_image
-    return "none", None
+        return "still_image", shot.still_image_id, still_image
+    return "none", "", None
 
 
 def shot_start_frame_source(database, shot) -> str:  # noqa: ANN001 - Database / ShotRead

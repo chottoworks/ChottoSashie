@@ -93,6 +93,15 @@ def figure_image_path(data_dir: Path, figure_id: str) -> Path:
     return figures_dir(data_dir) / f"{safe_id}.png"
 
 
+def figure_image_version(image_path: str) -> str:
+    """立ち絵の画像URLに付ける版。
+
+    立ち絵の画像は、置き換えるたびに別の名前で書く（同じ場所へ上書きしない）ので、
+    ファイル名だけで見分けられる。保存先の場所は画面へ出さない。
+    """
+    return Path(image_path).name if image_path else ""
+
+
 # 基準画像を正面全身へ組み直す指示文。角度LoRAが学習している語順そのままなので、
 # ここを言い換えない（言い換えると胸像のまま返る）。
 FIGURE_PROMPT = FULL_BODY_FRONT_PROMPT

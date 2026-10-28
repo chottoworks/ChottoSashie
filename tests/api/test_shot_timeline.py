@@ -410,6 +410,22 @@ def test_split_mode_generates_one_segment_per_beat(client: TestClient, fake_comf
     assert all(beat["segment_video_format"] == "mp4" for beat in beats)
 
 
+
+def test_regenerating_split_segments_moves_the_video_version(
+    client: TestClient, fake_comfy: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """区間動画もビートごとの場所へ上書きする。時刻が同じでも、作り直せば動画の版が変わる。"""
+    monkeypatch.setattr(shots, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    still_image_id = _still_image(client)
+    shot_id = _shot_with_beats(client, still_image_id, [3.0, 3.0])
+    _generate(client, shot_id)
+    before = client.get(f"/api/v1/shots/{shot_id}").json()["video_version"]
+
+    _generate(client, shot_id)
+
+    assert client.get(f"/api/v1/shots/{shot_id}").json()["video_version"] != before
+
+
 def test_split_mode_chains_beats_through_their_last_frames(client: TestClient, fake_comfy: dict) -> None:
     still_image_id = _still_image(client)
     shot_id = _shot_with_beats(client, still_image_id, [3.0, 3.0])

@@ -197,7 +197,7 @@ export function CharacterStudio({
   // 一覧が数えているのと同じもの（出来上がっていて、画像がある立ち絵）。
   const listedFigures = figures.filter((item) => item.state === "completed" && item.url);
   const readyFigureSignature = listedFigures
-    .map((item) => `${item.id}:${item.updated_at}`)
+    .map((item) => `${item.id}:${item.image_version}:${item.is_default}`)
     .join("|");
   const notifiedFigureSignature = useRef<string | null>(null);
   useEffect(() => {
@@ -504,14 +504,12 @@ export function CharacterStudio({
     return figure.label || (position >= 0 ? `立ち絵${position + 1}` : "立ち絵");
   };
 
-  const figureSrc = (figure: api.CharacterFigure) =>
-    `${api.characterFigureUrl(figure.id)}?v=${encodeURIComponent(figure.updated_at)}`;
   /** 出来上がった立ち絵を、一覧の並びのまま拡大する（前後へ送れる）。 */
   function openFigureGallery(figureId: string) {
     const shown = figures.filter((figure) => figure.state === "completed" && figure.url);
     lightbox.openGallery(
       shown.map((figure) => ({
-        src: figureSrc(figure),
+        src: api.characterFigureSrc(figure),
         caption: figureLabelOf(figure),
       })),
       shown.findIndex((figure) => figure.id === figureId),
@@ -530,8 +528,8 @@ export function CharacterStudio({
     );
   }
 
-  const editSrc = (edit: api.CharacterFigureEdit) =>
-    `${api.characterFigureEditUrl(edit.id)}?v=${encodeURIComponent(edit.updated_at)}`;
+  // 変更の結果は1回ごとに別の記録で、画像を書き直さないので版は要らない。
+  const editSrc = (edit: api.CharacterFigureEdit) => api.characterFigureEditUrl(edit.id);
 
   // プロフィールに何か書いてあるか（人物候補の土台になる）。
   const filledProfileFields = savedProfile
@@ -632,7 +630,7 @@ export function CharacterStudio({
             <img
               key={figure.id}
               className="vs-step-thumb vs-zoomable"
-              src={figureSrc(figure)}
+              src={api.characterFigureSrc(figure)}
               alt={figure.label || "立ち絵"}
               onClick={() => openFigureGallery(figure.id)}
             />
@@ -1015,7 +1013,7 @@ export function CharacterStudio({
                       {figure.state === "completed" && figure.url ? (
                         <img
                           className="vs-zoomable"
-                          src={figureSrc(figure)}
+                          src={api.characterFigureSrc(figure)}
                           alt={figureLabelOf(figure)}
                           onClick={() => openFigureGallery(figure.id)}
                         />
@@ -1395,7 +1393,7 @@ export function CharacterStudio({
       {compareTarget && (
         <CompareLightbox
           title={`${compareTarget.label}の変更`}
-          left={{ src: figureSrc(compareTarget.figure), caption: "いまの立ち絵" }}
+          left={{ src: api.characterFigureSrc(compareTarget.figure), caption: "いまの立ち絵" }}
           right={{ src: editSrc(compareTarget.edit), caption: "変更した立ち絵" }}
           actions={(
             <>

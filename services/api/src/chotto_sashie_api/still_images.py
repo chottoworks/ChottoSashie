@@ -45,6 +45,7 @@ def _to_still_image(row: Row) -> StillImageRead:
         character_ids=json.loads(row["character_ids_json"]),
         composition_job_id=row["composition_job_id"],
         has_image=bool(row["image_path"]),
+        image_version=str(row["image_revision"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -213,7 +214,11 @@ class StillImageRepository:
     def set_image(self, still_image_id: str, image_path: Path) -> StillImageRead:
         with self.database.connect() as connection:
             cursor = connection.execute(
-                "UPDATE still_images SET image_path = ?, updated_at = ? WHERE id = ?",
+                """
+                UPDATE still_images
+                SET image_path = ?, image_revision = image_revision + 1, updated_at = ?
+                WHERE id = ?
+                """,
                 (str(image_path), _now(), still_image_id),
             )
             if cursor.rowcount != 1:

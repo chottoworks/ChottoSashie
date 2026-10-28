@@ -13,6 +13,7 @@ function figure(id: string, overrides: Partial<CharacterFigure> = {}): Character
     is_default: false,
     has_image: true,
     url: `/api/v1/character-figures/${id}/image`,
+    image_version: `${id}-1a2b3c4d.png`,
     instruction: "",
     prop_asset_ids: [],
     source_figure_id: null,
@@ -46,7 +47,7 @@ describe("静止画で使う立ち絵", () => {
     expect(shown.figure_is_default).toBe(false);
     expect(shown.figure_label).toBe("ラベルf2");
     expect(shown.figure_url).toBe(
-      "/api/v1/character-figures/f2/image?v=2026-10-02T03%3A04%3A05%2B00%3A00",
+      "/api/v1/character-figures/f2/image?v=f2-1a2b3c4d.png",
     );
     // 指定の中身には触れない。
     expect(shown.spec).toEqual(info.spec);
