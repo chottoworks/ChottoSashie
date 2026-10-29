@@ -358,6 +358,22 @@ def test_pose_without_a_spec_only_cuts_out_the_figure(client: TestClient, fake_c
     assert client.get(f"/api/v1/still-images/{still_image_id}").json()["can_compose"] is True
 
 
+def test_character_carries_the_pose_job_to_follow_again(client: TestClient, fake_comfy: dict) -> None:
+    """画面を開き直しても姿づくりの進み具合を追えるよう、頼んだ処理を返す。"""
+    still_image_id, character_id = _placed_still_image(client)
+    assert _character(client, still_image_id)["pose_job_id"] is None
+
+    response = client.post(
+        f"/api/v1/still-images/{still_image_id}/characters/{character_id}/pose",
+        json={"base_url": _BASE_URL, "spec": {}, "seed": 4},
+    )
+    assert response.status_code == 200, response.text
+    job_id = response.json()["job_id"]
+    _finished(client, job_id)
+
+    assert _character(client, still_image_id)["pose_job_id"] == job_id
+
+
 def test_pose_with_a_spec_edits_then_cuts_out_and_saves_the_spec(
     client: TestClient, fake_comfy: dict
 ) -> None:

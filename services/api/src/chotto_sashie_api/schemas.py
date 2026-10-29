@@ -1092,6 +1092,8 @@ class StillImageCharacterRead(BaseModel):
     pose_prompt: str | None = None
     # 姿を作ったあとに立ち絵を選び直したか、指定が変わった。合成の前に作り直しが要る。
     pose_outdated: bool = False
+    # 最後に頼んだ姿づくりの処理。画面を開き直したとき、終わっていなければ進み具合を追い直す。
+    pose_job_id: str | None = None
     # 背景の上の位置。まだ置いていなければ既定の並び。
     layout: StillImageCharacterLayout
 

@@ -1296,6 +1296,10 @@ export const exportProject = (projectId: string, input: { fps?: number } = {}) =
     "書き出しに失敗しました",
   );
 
+/** これ以上進まない状態に入ったか（終わった・失敗した・中止した・中断された）。 */
+export const isJobFinished = (job: Job): boolean =>
+  ["completed", "failed", "cancelled", "interrupted"].includes(job.state);
+
 /** 状態を取れない時間がこれを超えたら、待つのをやめて理由を返す。 */
 const JOB_POLL_GIVE_UP_MS = 60_000;
 
@@ -1324,7 +1328,7 @@ export async function pollJob(jobId: string, onUpdate: (job: Job) => void): Prom
     }
     if (job) {
       onUpdate(job);
-      if (["completed", "failed", "cancelled", "interrupted"].includes(job.state)) {
+      if (isJobFinished(job)) {
         return job;
       }
     }
@@ -1495,6 +1499,8 @@ export interface StillImageCharacter {
   pose_prompt: string | null;
   /** 姿を作ったあとに立ち絵か指定が変わった。合成の前に作り直しが要る。 */
   pose_outdated: boolean;
+  /** 最後に頼んだ姿づくりの処理。開き直したとき、終わっていなければ進み具合を追い直す。 */
+  pose_job_id: string | null;
   /** 背景の上の位置。まだ置いていなければ既定の並び。 */
   layout: StillImageCharacterLayout;
 }

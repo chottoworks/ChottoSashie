@@ -24,25 +24,31 @@ function useJobRunner() {
   const [cancelling, setCancelling] = useState(false);
   // どのカード（素材・カット）の処理かを覚えて、進捗と中止をその場に出す。
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  // 開始と見張り直しが重なっても、追うのは1件だけにする（状態の更新は次の描画まで見えない）。
+  const tracking = useRef(false);
 
-  const run = useCallback(
+  const track = useCallback(
     async (
-      start: () => Promise<{ job_id: string }>,
+      start: () => Promise<string>,
       onDone: () => void | Promise<void>,
       setError: (value: string | null) => void,
-      key: string | null = null,
+      key: string | null,
+      initialMessage: string,
     ) => {
+      if (tracking.current) return;
+      tracking.current = true;
       setActiveKey(key);
       setRunning(true);
       setProgress(0);
-      setMessage("開始しています");
+      setMessage(initialMessage);
       setError(null);
       try {
-        const { job_id } = await start();
+        const job_id = await start();
         setJobId(job_id);
         const job = await api.pollJob(job_id, (j) => {
           setProgress(j.progress);
-          setMessage(j.message ?? "");
+          // 順番待ちの間は、ジョブにまだ言葉が無い。待っていることをその場で分かるようにする。
+          setMessage(j.state === "queued" ? "順番待ちです。前の処理が終わると始まります" : j.message ?? "");
         });
         // 中止は利用者の操作なので、失敗としては扱わない。
         if (job.state === "cancelled") {
@@ -56,6 +62,7 @@ function useJobRunner() {
       } catch (error) {
         setError(error instanceof Error ? error.message : String(error));
       } finally {
+        tracking.current = false;
         setRunning(false);
         setCancelling(false);
         setJobId(null);
@@ -63,6 +70,33 @@ function useJobRunner() {
       }
     },
     [],
+  );
+
+  const run = useCallback(
+    (
+      start: () => Promise<{ job_id: string }>,
+      onDone: () => void | Promise<void>,
+      setError: (value: string | null) => void,
+      key: string | null = null,
+    ) => track(async () => (await start()).job_id, onDone, setError, key, "開始しています"),
+    [track],
+  );
+
+  /**
+   * すでに始まっている処理を追い直す。
+   *
+   * 進み具合はこの部品が持っているので、画面を移ると消える。処理そのものはAPIの中で
+   * 続いている（順番待ちなら、前の処理が終わってから始まる）ので、開き直したときに
+   * ジョブを見つけて追い直し、進捗と中止をその場へ戻す。
+   */
+  const attach = useCallback(
+    (
+      jobId: string,
+      onDone: () => void | Promise<void>,
+      setError: (value: string | null) => void,
+      key: string | null = null,
+    ) => track(async () => jobId, onDone, setError, key, "状態を確かめています"),
+    [track],
   );
 
   const cancel = useCallback(
@@ -79,7 +113,39 @@ function useJobRunner() {
     [cancelling, jobId],
   );
 
-  return { running, progress, message, run, cancel, cancelling, jobId, activeKey };
+  return { running, progress, message, run, attach, cancel, cancelling, jobId, activeKey };
+}
+
+/** 記録に残っている処理と、その処理の進捗を出す場所（カードのキー）。 */
+type ResumeCandidate = { jobId: string | null; key: string | null };
+
+/**
+ * 開いたときに一度だけ、記録に残っている処理のうち終わっていないものを追い直す。
+ *
+ * `candidates` は記録を読み終えるまで null にしておく（読む前の空と、処理が無いことを
+ * 取り違えない）。追い直すのは最初に見つかった1件だけ（1つの部品が追うのは1件）。
+ */
+function useResumeJob(
+  candidates: ResumeCandidate[] | null,
+  attach: (jobId: string, key: string | null) => void,
+  setError: (value: string | null) => void,
+) {
+  const checked = useRef(false);
+  useEffect(() => {
+    if (checked.current || candidates === null) return;
+    checked.current = true;
+    const started = candidates.filter((item): item is { jobId: string; key: string | null } => Boolean(item.jobId));
+    if (started.length === 0) return;
+    void (async () => {
+      try {
+        const jobs = await Promise.all(started.map(({ jobId }) => api.getJob(jobId)));
+        const index = jobs.findIndex((job) => !api.isJobFinished(job));
+        if (index >= 0) attach(started[index].jobId, started[index].key);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  }, [candidates, attach, setError]);
 }
 
 /**
@@ -2509,6 +2575,12 @@ function StillImagePosePanel({
   const figureId = chosenFigureId(info);
   const [error, setError] = useState<string | null>(null);
   const pose = useJobRunner();
+  // 開いたとき、この人物の姿づくりが途中なら、その進み具合を追い直す。
+  useResumeJob(
+    info ? [{ jobId: info.pose_job_id, key: null }] : null,
+    (jobId) => void pose.attach(jobId, onPoseMade, setError),
+    setError,
+  );
   const lightbox = useLightbox();
   const differs = poseDraftDiffers(info, spec);
   const empty = posingKey(spec) === posingKey(EMPTY_STILL_IMAGE_CHARACTER_SPEC);
@@ -2940,6 +3012,13 @@ function StillImageCard({
   useEffect(() => {
     onComposeProgress(stillImage.id, compose.running ? compose.progress : null);
   }, [stillImage.id, compose.running, compose.progress, onComposeProgress]);
+  // 開いたとき、この静止画が合成中・順番待ちなら、その進み具合を追い直す。
+  // 押した画面を離れても（シーンの画面を見に行くなど）、合成は続いている。
+  useResumeJob(
+    [{ jobId: stillImage.composition_job_id, key: null }],
+    (jobId) => void compose.attach(jobId, onChanged, setError),
+    setError,
+  );
   const deletion = useDeletion(setError);
   // 保存は中身を受け取ってから行うので、その間を出す。
   const [saving, setSaving] = useState(false);
@@ -5013,6 +5092,15 @@ function SceneCutsCard({
   useEffect(() => {
     void reloadShots();
   }, [reloadShots]);
+
+  // 開いたとき、このシーンのカットの動画が生成中・順番待ちなら、その進み具合を追い直す。
+  // 押した画面を離れても（静止画の合成を見に行くなど）、処理は続いている。
+  // カットが無いうちは、まだ読んでいないのと同じ扱いにする（足したカットに処理は無い）。
+  useResumeJob(
+    shots.length > 0 ? shots.map((shot) => ({ jobId: shot.video_job_id, key: shot.id })) : null,
+    (jobId, key) => void video.attach(jobId, reloadShots, setError, key),
+    setError,
+  );
 
   // 名前とカットの数は一覧の行に出ているので、ここには中身だけを置く。
   return (

@@ -40,6 +40,7 @@ const info: StillImageCharacter = {
   pose_spec: null,
   pose_prompt: null,
   pose_outdated: false,
+  pose_job_id: null,
   layout: { x: 0.5, y: 0.9, height: 0.42 },
 };
 

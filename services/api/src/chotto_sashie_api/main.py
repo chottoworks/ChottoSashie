@@ -2831,6 +2831,7 @@ def _still_image_character_read(
             figure_id=figure.id if figure is not None else None,
             spec=spec,
         ),
+        pose_job_id=(record.pose_job_id or None) if record is not None else None,
         layout=(record.layout if record is not None else None) or default_layout(index, count),
     )
 
