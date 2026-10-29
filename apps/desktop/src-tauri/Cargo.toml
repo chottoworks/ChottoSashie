@@ -1,6 +1,6 @@
 [package]
 name = "chotto-sashie-desktop"
-version = "0.2.1"
+version = "0.3.0"
 description = "物語の挿絵と、その先の数秒を。ぜんぶ、このPCの中だけで。"
 authors = ["Chotto Works"]
 edition = "2021"
