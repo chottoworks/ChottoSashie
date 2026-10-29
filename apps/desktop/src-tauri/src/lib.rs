@@ -581,7 +581,10 @@ pub fn run() {
                 .min_inner_size(720.0, 640.0)
                 .resizable(true)
                 .visible(true)
-                .focused(true);
+                .focused(true)
+                // 画面の中のドラッグ（一覧の並べ替え）を画面側で受けるため。Windows では、
+                // ウィンドウがドラッグを横取りしていると、画面にドラッグが届かない。
+                .disable_drag_drop_handler();
             // 使う番号は起動のたびに変わりうるので、画面側へ教える。
             // ここで渡さないと、画面は決め打ちの番号へ繋ぎに行って空振りする。
             builder = builder.initialization_script(&format!(

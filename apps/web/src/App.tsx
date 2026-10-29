@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import * as api from "./api";
 import type { AssetKind, Project, StillImage } from "./api";
 import { CharacterStudio } from "./CharacterStudio";
@@ -3584,6 +3584,63 @@ function useFoldList<T extends { id: string }>({
   };
 }
 
+/** 掴んだ行を落とす位置。落とした先の行の手前か後ろ。 */
+type DropPlace = "before" | "after";
+
+/** id の並びから1件を抜き、別の1件の手前か後ろへ入れ直した並び。 */
+function movedOrder(ids: string[], id: string, targetId: string, place: DropPlace): string[] {
+  const rest = ids.filter((item) => item !== id);
+  const index = rest.indexOf(targetId) + (place === "after" ? 1 : 0);
+  return [...rest.slice(0, index), id, ...rest.slice(index)];
+}
+
+/** 行を掴んで動かすドラッグの、1行ぶんの受け口。 */
+interface FoldRowDrag {
+  dragging: boolean;
+  /** いま掴んでいる行を落とす位置が、この行の手前か後ろなら、その位置。 */
+  dropPlace: DropPlace | null;
+  start: () => void;
+  end: () => void;
+  /** 掴んでいる行がこの行の上に来た。一覧の並べ替えのドラッグでなければ false を返す。 */
+  over: (place: DropPlace) => boolean;
+  drop: (place: DropPlace) => void;
+}
+
+/** 行を掴んで、別の行の手前か後ろへ動かすドラッグ。返すのは、行ごとの受け口を作る関数。 */
+function useFoldDrag(onDrop: (id: string, targetId: string, place: DropPlace) => void) {
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [target, setTarget] = useState<{ id: string; place: DropPlace } | null>(null);
+  const end = () => {
+    setDraggingId(null);
+    setTarget(null);
+  };
+  return (id: string): FoldRowDrag => ({
+    dragging: draggingId === id,
+    dropPlace: draggingId && draggingId !== id && target?.id === id ? target.place : null,
+    start: () => setDraggingId(id),
+    end,
+    over: (place) => {
+      if (!draggingId) return false;
+      setTarget((current) => (current?.id === id && current.place === place ? current : { id, place }));
+      return true;
+    },
+    drop: (place) => {
+      if (draggingId && draggingId !== id) onDrop(draggingId, id, place);
+      end();
+    },
+  });
+}
+
+/** 行を並べ替える操作。上下の隣へ移すボタンと、行を掴んで動かすドラッグ。 */
+interface FoldRowOrder {
+  /** 読み上げに使う、この行の呼び名。 */
+  label: string;
+  /** 上（下）の隣へ移す。もう端にいて移せなければ null。 */
+  onMoveUp: (() => void) | null;
+  onMoveDown: (() => void) | null;
+  drag: FoldRowDrag;
+}
+
 /** 一覧の上の帯。件数と絞り込みと、一覧に対する操作を並べる。 */
 function FoldToolbar<T>({
   title,
@@ -3623,7 +3680,12 @@ function FoldToolbar<T>({
   );
 }
 
-/** 一覧の1行。押すと、その下に中身を広げる。中身（children）は一度開くまで渡さない。 */
+/**
+ * 一覧の1行。押すと、その下に中身を広げる。中身（children）は一度開くまで渡さない。
+ *
+ * 並べ替えられる一覧では、行の右に上下へ移すボタンを出し、行を掴んで動かせるようにする。
+ * 落とす位置は、落とした先の行の見出しの上半分なら手前、それより下（開いた中身も含む）なら後ろ。
+ */
 function FoldRow({
   rowId,
   open,
@@ -3633,6 +3695,7 @@ function FoldRow({
   title,
   meta,
   status,
+  order,
   children,
 }: {
   rowId: string;
@@ -3644,29 +3707,90 @@ function FoldRow({
   title: ReactNode;
   meta: ReactNode;
   status: ReactNode;
+  order?: FoldRowOrder;
   children?: ReactNode;
 }) {
+  const line = useRef<HTMLDivElement>(null);
+  const placeAt = (event: ReactDragEvent): DropPlace => {
+    const rect = line.current?.getBoundingClientRect();
+    return rect && event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+  };
+  const classes = [
+    "vs-fold-item",
+    open && "open",
+    order?.drag.dragging && "dragging",
+    order?.drag.dropPlace && `drop-${order.drag.dropPlace}`,
+  ];
   return (
-    <section id={rowId} className={`vs-fold-item ${open ? "open" : ""}`} hidden={hidden}>
-      <button
-        type="button"
-        className="vs-fold-head"
-        aria-expanded={open}
-        aria-controls={`${rowId}-body`}
-        onClick={onToggle}
+    <section
+      id={rowId}
+      className={classes.filter(Boolean).join(" ")}
+      hidden={hidden}
+      onDragOver={order && ((event) => {
+        if (!order.drag.over(placeAt(event))) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      })}
+      onDrop={order && ((event) => {
+        event.preventDefault();
+        order.drag.drop(placeAt(event));
+      })}
+    >
+      <div
+        ref={line}
+        className="vs-fold-line"
+        draggable={Boolean(order)}
+        onDragStart={order && ((event) => {
+          event.dataTransfer.effectAllowed = "move";
+          order.drag.start();
+        })}
+        onDragEnd={order?.drag.end}
       >
-        <span className="vs-fold-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
-        {thumbnailSrc ? (
-          <img className="vs-fold-thumb" src={thumbnailSrc} alt="" loading="lazy" />
-        ) : (
-          <span className="vs-fold-thumb empty" />
+        <button
+          type="button"
+          className="vs-fold-head"
+          aria-expanded={open}
+          aria-controls={`${rowId}-body`}
+          onClick={onToggle}
+        >
+          <span className="vs-fold-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+          {thumbnailSrc ? (
+            <img className="vs-fold-thumb" src={thumbnailSrc} alt="" loading="lazy" draggable={false} />
+          ) : (
+            <span className="vs-fold-thumb empty" />
+          )}
+          <span className="vs-fold-text">
+            <strong>{title}</strong>
+            <span className="vs-muted">{meta}</span>
+          </span>
+          {status}
+        </button>
+        {order && (
+          <div className="vs-fold-order">
+            <span className="vs-fold-grip" title="掴んで上下へ動かせます" aria-hidden="true">⠿</span>
+            <button
+              type="button"
+              className="vs-btn ghost"
+              disabled={!order.onMoveUp}
+              onClick={order.onMoveUp ?? undefined}
+              title="上へ移す"
+              aria-label={`${order.label}を上へ移す`}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="vs-btn ghost"
+              disabled={!order.onMoveDown}
+              onClick={order.onMoveDown ?? undefined}
+              title="下へ移す"
+              aria-label={`${order.label}を下へ移す`}
+            >
+              ↓
+            </button>
+          </div>
         )}
-        <span className="vs-fold-text">
-          <strong>{title}</strong>
-          <span className="vs-muted">{meta}</span>
-        </span>
-        {status}
-      </button>
+      </div>
       {children && (
         <div id={`${rowId}-body`} className="vs-fold-body" hidden={!open}>
           {children}
@@ -3725,6 +3849,9 @@ function StillImageStatus({ stillImage, progress }: { stillImage: StillImage; pr
  *
  * 一覧は1行に1枚で並べ、開くのは1枚だけにする。追加した静止画はその場で開き、そこまで画面を
  * 送る（末尾に足されて操作が遠くならないように）。
+ *
+ * 並びは入れ替えられる。シーンの並びと、全カットを書き出すときの順もこの並びに従う。
+ * 絞り込んでいるときは、見えている隣との間で動かす。
  */
 function StillImagesTab({ projectId, projectName }: { projectId: string; projectName: string }) {
   const [stillImages, setStillImages] = useState<StillImage[]>([]);
@@ -3741,6 +3868,9 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
   });
   const [creating, setCreating] = useState(false);
   const [composing, reportComposeProgress] = useProgressByItem();
+  // 並べ替えを送っている間に重ねて動かさない。ボタンは押せないようにせず（押したボタンから
+  // 選択が外れ、キーボードで続けて動かせなくなる）、送っている間の操作を受け流す。
+  const reordering = useRef(false);
 
   const [name, setName] = useState("");
   const [bg, setBg] = useState("");
@@ -3777,6 +3907,25 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  /** 静止画を、別の1枚の手前か後ろへ移す。 */
+  async function moveStillImage(id: string, targetId: string, place: DropPlace) {
+    const current = stillImages.map((item) => item.id);
+    const order = movedOrder(current, id, targetId, place);
+    if (reordering.current || order.join(",") === current.join(",")) return;
+    reordering.current = true;
+    try {
+      setStillImages(await api.reorderStillImages(projectId, order));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      // 見ている一覧が古かったときは、読み直してから並べ替えてもらう。
+      await reload();
+    } finally {
+      reordering.current = false;
+    }
+  }
+  const dragRow = useFoldDrag((id, targetId, place) => void moveStillImage(id, targetId, place));
+  const shownStillImages = stillImages.filter(fold.isShown);
 
   const newOverLimit = maxCharacters !== null && charIds.length > maxCharacters;
   // 1枚も無いうちは、作成欄を開いた状態で出す。
@@ -3859,6 +4008,10 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
       <div className="vs-fold-list">
         {stillImages.map((stillImage) => {
           const background = backgrounds.find((b) => b.id === stillImage.background_asset_id);
+          const shownIndex = shownStillImages.indexOf(stillImage);
+          const above = shownStillImages[shownIndex - 1];
+          const below = shownStillImages[shownIndex + 1];
+          const label = `#${stillImage.ordinal} ${stillImage.name || "（無題）"}`;
           return (
             <FoldRow
               key={stillImage.id}
@@ -3867,9 +4020,15 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
               hidden={!fold.isShown(stillImage)}
               onToggle={() => fold.toggle(stillImage.id)}
               thumbnailSrc={stillImage.has_image ? api.stillImageSrc(stillImage) : null}
-              title={`#${stillImage.ordinal} ${stillImage.name || "（無題）"}`}
+              title={label}
               meta={`背景: ${background?.name ?? "なし"} ／ 人物: ${characterNames(stillImage, characters) || "なし"}`}
               status={<StillImageStatus stillImage={stillImage} progress={composing[stillImage.id]} />}
+              order={{
+                label,
+                onMoveUp: above ? () => void moveStillImage(stillImage.id, above.id, "before") : null,
+                onMoveDown: below ? () => void moveStillImage(stillImage.id, below.id, "after") : null,
+                drag: dragRow(stillImage.id),
+              }}
             >
               {fold.isMounted(stillImage.id) && (
                 <StillImageCard

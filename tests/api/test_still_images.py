@@ -181,3 +181,52 @@ def test_existing_over_limit_still_image_can_still_be_fixed(
     )
     assert fixed.status_code == 200
     assert fixed.json()["character_ids"] == characters[:MAX_CHARACTERS]
+
+
+def _still_image_ids(client: TestClient, project_id: str) -> list[str]:
+    return [item["id"] for item in client.get(f"/api/v1/projects/{project_id}/still-images").json()]
+
+
+def test_still_images_can_be_reordered(client: TestClient, project_id: str) -> None:
+    """渡した順に並び、番号は抜けを詰めて 1 から振り直す。あとから足した1枚は末尾に付く。"""
+    url = f"/api/v1/projects/{project_id}/still-images"
+    first, removed, second, third = (
+        client.post(url, json={"name": name}).json()["id"] for name in ("朝", "昼", "夕方", "夜")
+    )
+    client.delete(f"/api/v1/still-images/{removed}")
+    order = [third, first, second]
+
+    response = client.put(f"{url}/order", json={"still_image_ids": order})
+
+    assert response.status_code == 200, response.text
+    assert [(item["id"], item["ordinal"]) for item in response.json()] == [
+        (third, 1),
+        (first, 2),
+        (second, 3),
+    ]
+    assert _still_image_ids(client, project_id) == order
+    fourth = client.post(url, json={"name": "深夜"}).json()
+    assert fourth["ordinal"] == 4
+    assert _still_image_ids(client, project_id) == [*order, fourth["id"]]
+
+
+def test_still_image_reorder_is_refused_when_the_list_changed(
+    client: TestClient, project_id: str
+) -> None:
+    """画面が古い一覧を見ていたら断り、並びは変えない。別の作品の静止画も受け付けない。"""
+    url = f"/api/v1/projects/{project_id}/still-images"
+    first, second = (client.post(url, json={"name": name}).json()["id"] for name in ("朝", "夜"))
+    other_project = client.post("/api/v1/projects", json={"name": "別の作品"}).json()["id"]
+    other = client.post(
+        f"/api/v1/projects/{other_project}/still-images", json={"name": "よそ"}
+    ).json()["id"]
+
+    for still_image_ids in ([second], [second, first, other], [first] * 2):
+        response = client.put(f"{url}/order", json={"still_image_ids": still_image_ids})
+        assert response.status_code == 409
+    assert _still_image_ids(client, project_id) == [first, second]
+
+
+def test_reordering_still_images_of_a_missing_project_returns_404(client: TestClient) -> None:
+    response = client.put("/api/v1/projects/missing/still-images/order", json={"still_image_ids": []})
+    assert response.status_code == 404

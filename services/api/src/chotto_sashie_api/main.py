@@ -344,6 +344,7 @@ from .schemas import (
     SetupStatus,
     StillImageCreate,
     StillImageDeletionPreview,
+    StillImageOrder,
     StillImageRead,
     StillImageUpdate,
     StillImageUsageInfo,
@@ -2425,6 +2426,17 @@ def list_still_images(project_id: str) -> list[StillImageRead]:
         return StillImageRepository(database).list(project_id)
     except ProjectNotFoundError as error:
         raise HTTPException(status_code=404, detail="作品が見つかりません") from error
+
+
+@app.put("/api/v1/projects/{project_id}/still-images/order", response_model=list[StillImageRead])
+def reorder_still_images(project_id: str, request: StillImageOrder) -> list[StillImageRead]:
+    """静止画を並べ替える。シーンの並びと、全カットを書き出すときの順もこれに従う。"""
+    try:
+        return StillImageRepository(database).reorder(project_id, request.still_image_ids)
+    except ProjectNotFoundError as error:
+        raise HTTPException(status_code=404, detail="作品が見つかりません") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.get("/api/v1/still-images/{still_image_id}", response_model=StillImageRead)

@@ -322,11 +322,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .vs-fold-filters .vs-tab { padding: 5px 12px; font-size: 12px; }
 .vs-fold-lead { margin: -6px 0 14px; line-height: 1.8; }
 .vs-fold-list { display: grid; gap: 8px; }
-.vs-fold-item { border: 1px solid #d8d0c2; background: #fffdf8; border-radius: 10px; scroll-margin-top: 12px; }
+.vs-fold-item { position: relative; border: 1px solid #d8d0c2; background: #fffdf8; border-radius: 10px; scroll-margin-top: 12px; }
 .vs-fold-item.open { border-color: #b3a894; }
-.vs-fold-head { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 14px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.vs-fold-line { display: flex; align-items: center; }
+.vs-fold-item.open .vs-fold-line { border-bottom: 1px solid #e2dacd; }
+.vs-fold-head { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 8px 14px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .vs-fold-head:hover { background: #f6f2ea; }
-.vs-fold-item.open .vs-fold-head { border-bottom: 1px solid #e2dacd; border-radius: 10px 10px 0 0; }
+.vs-fold-item.open .vs-fold-head { border-radius: 10px 10px 0 0; }
+/* 右に並べ替えの操作が続く行では、見出しの右の角を丸めない。 */
+.vs-fold-line > .vs-fold-head:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.vs-fold-order { flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px; }
+.vs-fold-order .vs-btn { padding: 4px 9px; }
+.vs-fold-grip { padding: 4px 6px; color: #8f887c; font-size: 16px; cursor: grab; user-select: none; }
+.vs-fold-item.dragging { opacity: 0.5; }
+/* 掴んだ行を落とす位置。行と行の間（隙間 8px）の中ほどに線を引く。 */
+.vs-fold-item.drop-before::before, .vs-fold-item.drop-after::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; border-radius: 1px; background: #2e3934; pointer-events: none; }
+.vs-fold-item.drop-before::before { top: -6px; }
+.vs-fold-item.drop-after::after { bottom: -6px; }
 .vs-fold-caret { flex: none; width: 12px; color: #77716a; font-size: 12px; }
 .vs-fold-thumb { flex: none; display: block; width: 72px; height: 45px; object-fit: cover; border: 1px solid #ddd5c7; border-radius: 5px; background: #efe9df; }
 .vs-fold-text { flex: 1; min-width: 0; display: grid; gap: 2px; }

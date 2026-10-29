@@ -366,6 +366,12 @@ class StillImageUpdate(BaseModel):
     composition_method: CompositionMethod | None = None
 
 
+class StillImageOrder(BaseModel):
+    """静止画の並び。この作品の静止画すべてのidを、上から順に渡す。"""
+
+    still_image_ids: list[str] = Field(max_length=10000)
+
+
 class StillImageRead(BaseModel):
     id: str
     project_id: str

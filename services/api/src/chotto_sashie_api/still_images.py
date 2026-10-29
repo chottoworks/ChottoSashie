@@ -165,6 +165,34 @@ class StillImageRepository:
             ).fetchall()
         return [_complete(self.database, row) for row in rows]
 
+    def reorder(self, project_id: str, still_image_ids: list[str]) -> list[StillImageRead]:
+        """この作品の静止画を、渡された順（上から）に並べ替え、番号を 1, 2, … と振り直す。
+
+        渡すのはこの作品の静止画すべて。画面が古い一覧を見ている間に増減していたら、
+        どこへ入れるつもりだったのか決められないので断る（`ValueError`）。
+        """
+        ProjectRepository(self.database).get(project_id)
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT id, ordinal FROM still_images WHERE project_id = ?", (project_id,)
+            ).fetchall()
+            current = {row["id"] for row in rows}
+            if len(still_image_ids) != len(set(still_image_ids)) or set(still_image_ids) != current:
+                raise ValueError("静止画の一覧が変わっていました。今の一覧で並べ替え直してください")
+            # 番号は作品の中で重ならない決まり。いったん今の最大より後ろへ逃がしてから振り直す
+            # （1件ずつ書き換えると、途中で別の静止画と番号がぶつかる）。
+            top = max((row["ordinal"] for row in rows), default=0)
+            for offset in (top, 0):
+                connection.executemany(
+                    "UPDATE still_images SET ordinal = ? WHERE id = ?",
+                    [
+                        (offset + position, still_image_id)
+                        for position, still_image_id in enumerate(still_image_ids, start=1)
+                    ],
+                )
+        return self.list(project_id)
+
     def update(self, still_image_id: str, request: StillImageUpdate) -> StillImageRead:
         current = self.get(still_image_id)
         updates = request.model_dump(exclude_unset=True)

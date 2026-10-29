@@ -1082,6 +1082,14 @@ export const deleteAsset = (kind: AssetKind, assetId: string) =>
 // --- 静止画 ---
 export const listStillImages = (projectId: string) =>
   apiGet<StillImage[]>(`/api/v1/projects/${projectId}/still-images`, "静止画を取得できませんでした");
+/** 静止画を並べ替える。この作品の静止画すべてのidを、上から順に渡す。 */
+export const reorderStillImages = (projectId: string, stillImageIds: string[]) =>
+  apiSend<StillImage[]>(
+    `/api/v1/projects/${projectId}/still-images/order`,
+    "PUT",
+    { still_image_ids: stillImageIds },
+    "静止画を並べ替えられませんでした",
+  );
 export const createStillImage = (
   projectId: string,
   input: { name?: string; background_asset_id?: string | null; character_ids?: string[] },

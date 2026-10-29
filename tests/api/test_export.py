@@ -62,6 +62,18 @@ def test_gather_orders_by_still_image_then_shot(client: TestClient, tmp_path: Pa
     assert [p.name for p in videos] == ["vid-0.webp", "vid-1.webp"]
 
 
+def test_gather_follows_the_reordered_still_images(client: TestClient, tmp_path: Path) -> None:
+    """静止画を並べ替えると、書き出すときのシーンの順もそれに従う。"""
+    project_id = _project_with_shots(client, tmp_path)
+    listed = client.get(f"/api/v1/projects/{project_id}/still-images").json()
+    client.put(
+        f"/api/v1/projects/{project_id}/still-images/order",
+        json={"still_image_ids": [item["id"] for item in reversed(listed)]},
+    )
+    videos = list_project_shot_videos(main.database, project_id)
+    assert [p.name for p in videos] == ["vid-1.webp", "vid-0.webp"]
+
+
 def test_status_reports_ffmpeg(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "find_ffmpeg", lambda: "/usr/bin/ffmpeg")
     body = client.get("/api/v1/export/status").json()
