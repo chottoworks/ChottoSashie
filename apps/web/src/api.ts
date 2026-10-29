@@ -392,6 +392,9 @@ export interface StillImage {
   composition_method: CompositionMethod;
   /** 今の画像を合成するときに ComfyUI へ渡したプロンプト。空なら記録が無い。 */
   source_prompt: string;
+  /** シーンとしての進み具合。カットの数と、そのうち動画のあるカットの数。 */
+  shot_count: number;
+  shot_video_count: number;
 }
 export type CompositionMethod = "placed" | "text";
 /** ビートの実現方法。single=1回で生成 / split=区間ごとに生成して繋ぐ。 */

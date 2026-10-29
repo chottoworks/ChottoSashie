@@ -315,23 +315,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .vs-still-source-image.figure { aspect-ratio: auto; max-width: 132px; object-fit: contain; }
 .vs-still-source-image.empty { display: grid; place-items: center; width: 132px; cursor: default; }
 .vs-still-source-image.figure.empty { width: 88px; }
-/* 静止画の一覧。1行に1枚並べ、開いた1枚だけ行の下に操作を広げる。 */
-.vs-still-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-.vs-still-toolbar h2 { margin: 0 auto 0 0; font-size: 20px; }
-.vs-still-filters { gap: 6px; }
-.vs-still-filters .vs-tab { padding: 5px 12px; font-size: 12px; }
-.vs-still-list { display: grid; gap: 8px; }
-.vs-still-item { border: 1px solid #d8d0c2; background: #fffdf8; border-radius: 10px; scroll-margin-top: 12px; }
-.vs-still-item.open { border-color: #b3a894; }
-.vs-still-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 14px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.vs-still-row:hover { background: #f6f2ea; }
-.vs-still-item.open .vs-still-row { border-bottom: 1px solid #e2dacd; border-radius: 10px 10px 0 0; }
-.vs-still-row-caret { flex: none; width: 12px; color: #77716a; font-size: 12px; }
-.vs-still-row-thumb { flex: none; display: block; width: 72px; height: 45px; object-fit: cover; border: 1px solid #ddd5c7; border-radius: 5px; background: #efe9df; }
-.vs-still-row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.vs-still-row-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vs-still-row-text strong { font-size: 14px; }
-.vs-still-body { padding: 14px 20px 18px; }
+/* 静止画・シーンの一覧。1行に1件並べ、開いた1件だけ行の下に中身を広げる。 */
+.vs-fold-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.vs-fold-toolbar h2 { margin: 0 auto 0 0; font-size: 20px; }
+.vs-fold-filters { gap: 6px; }
+.vs-fold-filters .vs-tab { padding: 5px 12px; font-size: 12px; }
+.vs-fold-lead { margin: -6px 0 14px; line-height: 1.8; }
+.vs-fold-list { display: grid; gap: 8px; }
+.vs-fold-item { border: 1px solid #d8d0c2; background: #fffdf8; border-radius: 10px; scroll-margin-top: 12px; }
+.vs-fold-item.open { border-color: #b3a894; }
+.vs-fold-head { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 14px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.vs-fold-head:hover { background: #f6f2ea; }
+.vs-fold-item.open .vs-fold-head { border-bottom: 1px solid #e2dacd; border-radius: 10px 10px 0 0; }
+.vs-fold-caret { flex: none; width: 12px; color: #77716a; font-size: 12px; }
+.vs-fold-thumb { flex: none; display: block; width: 72px; height: 45px; object-fit: cover; border: 1px solid #ddd5c7; border-radius: 5px; background: #efe9df; }
+.vs-fold-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.vs-fold-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-fold-text strong { font-size: 14px; }
+.vs-fold-body { padding: 14px 20px 18px; }
 .vs-still-body-actions { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 /* 選んでいる背景。名前だけでは見分けにくいので、選ぶ欄のすぐ下に出す。 */
 .vs-picked-background { max-width: 280px; margin-top: 6px; }

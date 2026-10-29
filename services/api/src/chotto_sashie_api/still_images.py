@@ -35,6 +35,18 @@ def _with_readiness(database: Database, still_image: StillImageRead) -> StillIma
     return still_image.model_copy(update={"can_compose": not reason, "compose_blocked_reason": reason})
 
 
+def _with_shot_counts(database: Database, still_image: StillImageRead) -> StillImageRead:
+    """シーンとしての進み具合を添える。シーンの一覧は、カットを開かずにこれだけで並べる。"""
+    from .shots import count_scene_shots
+
+    shot_count, video_count = count_scene_shots(database, still_image.id)
+    return still_image.model_copy(update={"shot_count": shot_count, "shot_video_count": video_count})
+
+
+def _complete(database: Database, row: Row) -> StillImageRead:
+    return _with_shot_counts(database, _with_readiness(database, _to_still_image(row)))
+
+
 def _to_still_image(row: Row) -> StillImageRead:
     return StillImageRead(
         id=row["id"],
@@ -142,7 +154,7 @@ class StillImageRepository:
             ).fetchone()
         if row is None:
             raise StillImageNotFoundError(still_image_id)
-        return _with_readiness(self.database, _to_still_image(row))
+        return _complete(self.database, row)
 
     def list(self, project_id: str) -> list[StillImageRead]:
         ProjectRepository(self.database).get(project_id)
@@ -151,7 +163,7 @@ class StillImageRepository:
                 "SELECT * FROM still_images WHERE project_id = ? ORDER BY ordinal",
                 (project_id,),
             ).fetchall()
-        return [_with_readiness(self.database, _to_still_image(row)) for row in rows]
+        return [_complete(self.database, row) for row in rows]
 
     def update(self, still_image_id: str, request: StillImageUpdate) -> StillImageRead:
         current = self.get(still_image_id)

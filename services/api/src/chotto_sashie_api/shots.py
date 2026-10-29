@@ -159,6 +159,18 @@ def _exists(path: str | None) -> bool:
     return bool(path) and Path(path).is_file()
 
 
+def count_scene_shots(database: Database, still_image_id: str) -> tuple[int, int]:
+    """シーン（静止画1枚）のカットの数と、そのうち動画のあるカットの数。
+
+    動画の有無は、カットの has_video と同じく実体で数える。
+    """
+    with database.connect() as connection:
+        rows = connection.execute(
+            "SELECT output_video_path FROM shots WHERE still_image_id = ?", (still_image_id,)
+        ).fetchall()
+    return len(rows), sum(1 for row in rows if _exists(row["output_video_path"]))
+
+
 def _video_format(video_path: str | None) -> str:
     """保存済み動画の入れ物を拡張子から読む（webp=Wan / mp4=MiniMax H3）。"""
     if not video_path:

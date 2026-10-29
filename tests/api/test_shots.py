@@ -48,6 +48,29 @@ def test_shot_crud(client: TestClient, still_image_id: str) -> None:
     assert client.get(f"/api/v1/shots/{shot['id']}").status_code == 404
 
 
+def test_still_image_lists_scene_progress(client: TestClient, still_image_id: str, tmp_path: Path) -> None:
+    """シーンの一覧は、カットを開かずにカットの数と動画のあるカットの数を出せる。"""
+    from chotto_sashie_api.shots import ShotRepository
+
+    first = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()
+    client.post(f"/api/v1/still-images/{still_image_id}/shots", json={})
+    project_id = client.get(f"/api/v1/still-images/{still_image_id}").json()["project_id"]
+
+    listed = client.get(f"/api/v1/projects/{project_id}/still-images").json()
+    assert (listed[0]["shot_count"], listed[0]["shot_video_count"]) == (2, 0)
+
+    video = tmp_path / "cut.webp"
+    video.write_bytes(b"video")
+    ShotRepository(main.database).set_output_video(first["id"], video)
+    still_image = client.get(f"/api/v1/still-images/{still_image_id}").json()
+    assert (still_image["shot_count"], still_image["shot_video_count"]) == (2, 1)
+
+    # 道だけ残って実体が無い動画は、カットの has_video と同じく数えない。
+    video.unlink()
+    still_image = client.get(f"/api/v1/still-images/{still_image_id}").json()
+    assert still_image["shot_video_count"] == 0
+
+
 def test_create_shot_under_missing_still_image_returns_404(client: TestClient) -> None:
     response = client.post("/api/v1/still-images/nope/shots", json={"motion_prompt": "x"})
     assert response.status_code == 404

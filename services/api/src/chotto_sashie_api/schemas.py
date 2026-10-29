@@ -383,6 +383,9 @@ class StillImageRead(BaseModel):
     # 実行できない操作は押せないようにするための判定と、その理由。
     can_compose: bool = True
     compose_blocked_reason: str = ""
+    # シーンとしての進み具合。カットの数と、そのうち動画のあるカットの数。
+    shot_count: int = 0
+    shot_video_count: int = 0
     created_at: datetime
     updated_at: datetime
 

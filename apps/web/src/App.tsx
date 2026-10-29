@@ -3113,7 +3113,7 @@ function StillImageCard({
 
   // 名前と状態は一覧の行に出ているので、ここには操作だけを置く。
   return (
-    <div className="vs-still-body">
+    <div>
       <div className="vs-still-body-actions">
         <button
           className="vs-btn danger"
@@ -3491,12 +3491,218 @@ function StillImageCard({
   );
 }
 
-// 作品ごとに、開いていた静止画。タブを行き来しても、起動し直しても、同じ1枚から続けられるようにする。
-const OPEN_STILL_IMAGE_KEY = "chotto-sashie.open-still-image";
+// ============================ 1行に1件の一覧 ============================
 
-type StillImageFilter = "all" | "pending" | "composed";
+/** 一覧の絞り込み。先頭が「すべて」。 */
+interface FoldFilter<T> {
+  key: string;
+  label: string;
+  matches: (item: T) => boolean;
+}
 
-const STILL_IMAGE_FILTERS: { key: StillImageFilter; label: string; matches: (item: StillImage) => boolean }[] = [
+/**
+ * 1行に1件並べ、開いた1件だけ中身を広げる一覧の状態。
+ *
+ * 件数が増えても目当ての1件へすぐ行けるようにする。開いていた1件は作品ごとに覚え、タブを
+ * 行き来しても、起動し直しても、同じ1件から続けられるようにする。
+ *
+ * 一度開いた中身は、閉じても描いたままにする。書きかけの内容と生成の進み具合は中身が持って
+ * いるので、外すと消えてしまう。開いたことのない1件は行だけを出し、中身はまだ読まない。
+ */
+function useFoldList<T extends { id: string }>({
+  name,
+  projectId,
+  items,
+  loaded,
+  filters,
+}: {
+  /** 開いていた1件を覚える名前。行の要素の id にも使う。 */
+  name: string;
+  projectId: string;
+  items: T[];
+  loaded: boolean;
+  filters: FoldFilter<T>[];
+}) {
+  const storageKey = `chotto-sashie.open-${name}.${projectId}`;
+  const [openId, setOpenId] = useState<string | null>(() => window.localStorage.getItem(storageKey));
+  const [mountedIds, setMountedIds] = useState<Set<string>>(() => new Set(openId ? [openId] : []));
+  // 開いたあとに画面を送る先。always でなければ、行が画面の上へ外れたときだけ送る。
+  const scrollTarget = useRef<{ id: string; always: boolean } | null>(
+    openId ? { id: openId, always: true } : null,
+  );
+  const [filterKey, setFilterKey] = useState(filters[0].key);
+  const rowId = (id: string) => `${name}-${id}`;
+
+  const open = (id: string | null, scroll: { always: boolean } | null) => {
+    setOpenId(id);
+    if (id) {
+      setMountedIds((current) => (current.has(id) ? current : new Set(current).add(id)));
+      window.localStorage.setItem(storageKey, id);
+    } else {
+      window.localStorage.removeItem(storageKey);
+    }
+    scrollTarget.current = id && scroll ? { id, always: scroll.always } : null;
+  };
+
+  // 覚えていた1件が削除されていたら、何も開いていない状態に戻す。
+  const idsKey = items.map((item) => item.id).join(",");
+  useEffect(() => {
+    if (loaded && openId && !idsKey.split(",").includes(openId)) {
+      setOpenId(null);
+      window.localStorage.removeItem(storageKey);
+    }
+  }, [loaded, openId, idsKey, storageKey]);
+
+  // 開いた行が見える位置まで画面を送る。前に開いていた中身が閉じると、行が上へずれるため。
+  useEffect(() => {
+    const target = scrollTarget.current;
+    if (!target) return;
+    const row = document.getElementById(`${name}-${target.id}`);
+    if (!row) return;
+    scrollTarget.current = null;
+    if (target.always || row.getBoundingClientRect().top < 0) {
+      row.scrollIntoView({ block: "start" });
+    }
+  }, [name, openId, idsKey]);
+
+  const activeFilter = filters.find((item) => item.key === filterKey) ?? filters[0];
+  // 開いている1件は、絞り込みに合わなくなっても出したままにする（仕上がった途端に消えないように）。
+  const isShown = (item: T) => item.id === openId || activeFilter.matches(item);
+
+  return {
+    openId,
+    open,
+    /** 行を押したとき。開いていれば閉じ、閉じていれば開く。 */
+    toggle: (id: string) => open(openId === id ? null : id, openId === id ? null : { always: false }),
+    isMounted: (id: string) => mountedIds.has(id),
+    rowId,
+    filterKey,
+    setFilterKey,
+    activeFilter,
+    isShown,
+    shownCount: items.filter(isShown).length,
+  };
+}
+
+/** 一覧の上の帯。件数と絞り込みと、一覧に対する操作を並べる。 */
+function FoldToolbar<T>({
+  title,
+  filterLabel,
+  filters,
+  items,
+  filterKey,
+  onFilterChange,
+  children,
+}: {
+  title: ReactNode;
+  filterLabel: string;
+  filters: FoldFilter<T>[];
+  items: T[];
+  filterKey: string;
+  onFilterChange: (key: string) => void;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="vs-fold-toolbar">
+      <h2>{title}</h2>
+      <div className="vs-row vs-fold-filters" role="group" aria-label={filterLabel}>
+        {filters.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`vs-tab ${filterKey === item.key ? "active" : ""}`}
+            aria-pressed={filterKey === item.key}
+            onClick={() => onFilterChange(item.key)}
+          >
+            {item.label} {items.filter(item.matches).length}
+          </button>
+        ))}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** 一覧の1行。押すと、その下に中身を広げる。中身（children）は一度開くまで渡さない。 */
+function FoldRow({
+  rowId,
+  open,
+  hidden,
+  onToggle,
+  thumbnailSrc,
+  title,
+  meta,
+  status,
+  children,
+}: {
+  rowId: string;
+  open: boolean;
+  hidden: boolean;
+  onToggle: () => void;
+  /** 行の左に出す縮小画像。まだ無ければ null で、空の枠を出す。 */
+  thumbnailSrc: string | null;
+  title: ReactNode;
+  meta: ReactNode;
+  status: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <section id={rowId} className={`vs-fold-item ${open ? "open" : ""}`} hidden={hidden}>
+      <button
+        type="button"
+        className="vs-fold-head"
+        aria-expanded={open}
+        aria-controls={`${rowId}-body`}
+        onClick={onToggle}
+      >
+        <span className="vs-fold-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        {thumbnailSrc ? (
+          <img className="vs-fold-thumb" src={thumbnailSrc} alt="" loading="lazy" />
+        ) : (
+          <span className="vs-fold-thumb empty" />
+        )}
+        <span className="vs-fold-text">
+          <strong>{title}</strong>
+          <span className="vs-muted">{meta}</span>
+        </span>
+        {status}
+      </button>
+      {children && (
+        <div id={`${rowId}-body`} className="vs-fold-body" hidden={!open}>
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** 進み具合の記録（合成中・生成中の1件ごとの割合）。中身のカードが知らせてくる。 */
+function useProgressByItem() {
+  const [progressById, setProgressById] = useState<Record<string, number>>({});
+  const report = useCallback((id: string, progress: number | null) => {
+    setProgressById((current) => {
+      if (progress === null) {
+        if (!(id in current)) return current;
+        const rest = { ...current };
+        delete rest[id];
+        return rest;
+      }
+      return current[id] === progress ? current : { ...current, [id]: progress };
+    });
+  }, []);
+  return [progressById, report] as const;
+}
+
+function characterNames(item: StillImage, characters: api.Character[]): string {
+  return item.character_ids
+    .map((id) => characters.find((c) => c.id === id)?.name)
+    .filter((value): value is string => Boolean(value))
+    .join("、");
+}
+
+// ============================ 静止画の一覧 ============================
+
+const STILL_IMAGE_FILTERS: FoldFilter<StillImage>[] = [
   { key: "all", label: "すべて", matches: () => true },
   { key: "pending", label: "未合成", matches: (item) => !item.has_image },
   { key: "composed", label: "合成済み", matches: (item) => item.has_image },
@@ -3517,8 +3723,8 @@ function StillImageStatus({ stillImage, progress }: { stillImage: StillImage; pr
  *
  * 挿絵として使うならここが完成地点で、動画を作る場合はこの1枚が「シーン」の起点になる。
  *
- * 枚数が増えても目当ての1枚へすぐ行けるよう、一覧は1行に1枚で並べ、開くのは1枚だけにする。
- * 追加した静止画はその場で開き、そこまで画面を送る（末尾に足されて操作が遠くならないように）。
+ * 一覧は1行に1枚で並べ、開くのは1枚だけにする。追加した静止画はその場で開き、そこまで画面を
+ * 送る（末尾に足されて操作が遠くならないように）。
  */
 function StillImagesTab({ projectId, projectName }: { projectId: string; projectName: string }) {
   const [stillImages, setStillImages] = useState<StillImage[]>([]);
@@ -3526,45 +3732,15 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
   const [backgrounds, setBackgrounds] = useState<api.Asset[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const openKey = `${OPEN_STILL_IMAGE_KEY}.${projectId}`;
-  const [openId, setOpenId] = useState<string | null>(() => window.localStorage.getItem(openKey));
-  // 一度開いた静止画のカードは、閉じても描いたままにする。書きかけの指定・置いた位置と、
-  // 合成の進み具合はカードが持っているので、外すと消えてしまう。開いたことのない静止画は
-  // 行だけを出し、立ち絵などはまだ読まない。
-  const [mountedIds, setMountedIds] = useState<Set<string>>(
-    () => new Set(openId ? [openId] : []),
-  );
-  // 開いたあとに画面を送る先。always でなければ、行が画面の上へ外れたときだけ送る。
-  const scrollTarget = useRef<{ id: string; always: boolean } | null>(
-    openId ? { id: openId, always: true } : null,
-  );
-  const [filter, setFilter] = useState<StillImageFilter>("all");
+  const fold = useFoldList({
+    name: "still-image",
+    projectId,
+    items: stillImages,
+    loaded,
+    filters: STILL_IMAGE_FILTERS,
+  });
   const [creating, setCreating] = useState(false);
-  const [composing, setComposing] = useState<Record<string, number>>({});
-
-  const openStillImage = (id: string | null, scroll: { always: boolean } | null) => {
-    setOpenId(id);
-    if (id) {
-      setMountedIds((current) => (current.has(id) ? current : new Set(current).add(id)));
-      window.localStorage.setItem(openKey, id);
-    } else {
-      window.localStorage.removeItem(openKey);
-    }
-    scrollTarget.current = id && scroll ? { id, always: scroll.always } : null;
-  };
-
-  const reportComposeProgress = useCallback((id: string, progress: number | null) => {
-    setComposing((current) => {
-      if (progress === null) {
-        if (!(id in current)) return current;
-        const rest = { ...current };
-        delete rest[id];
-        return rest;
-      }
-      return current[id] === progress ? current : { ...current, [id]: progress };
-    });
-  }, []);
+  const [composing, reportComposeProgress] = useProgressByItem();
 
   const [name, setName] = useState("");
   const [bg, setBg] = useState("");
@@ -3602,61 +3778,25 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
     void reload();
   }, [reload]);
 
-  // 覚えていた静止画が削除されていたら、何も開いていない状態に戻す。
-  useEffect(() => {
-    if (loaded && openId && !stillImages.some((item) => item.id === openId)) {
-      setOpenId(null);
-      window.localStorage.removeItem(openKey);
-    }
-  }, [loaded, openId, stillImages, openKey]);
-
-  // 開いた行が見える位置まで画面を送る。前に開いていたカードが閉じると、行が上へずれるため。
-  useEffect(() => {
-    const target = scrollTarget.current;
-    if (!target) return;
-    const row = document.getElementById(`still-image-${target.id}`);
-    if (!row) return;
-    scrollTarget.current = null;
-    if (target.always || row.getBoundingClientRect().top < 0) {
-      row.scrollIntoView({ block: "start", behavior: "smooth" });
-    }
-  }, [openId, stillImages]);
-
   const newOverLimit = maxCharacters !== null && charIds.length > maxCharacters;
   // 1枚も無いうちは、作成欄を開いた状態で出す。
   const showCreate = creating || (loaded && stillImages.length === 0);
-  const activeFilter = STILL_IMAGE_FILTERS.find((item) => item.key === filter) ?? STILL_IMAGE_FILTERS[0];
-  // 開いている1枚は、絞り込みに合わなくなっても出したままにする（合成し終えた途端に消えないように）。
-  const isShown = (item: StillImage) => item.id === openId || activeFilter.matches(item);
-  const shownCount = stillImages.filter(isShown).length;
-  const characterNames = (item: StillImage) =>
-    item.character_ids
-      .map((id) => characters.find((c) => c.id === id)?.name)
-      .filter((value): value is string => Boolean(value))
-      .join("、");
 
   return (
     <div>
       {error && <div className="vs-error">{error}</div>}
-      <div className="vs-still-toolbar">
-        <h2>静止画（{stillImages.length}枚）</h2>
-        <div className="vs-row vs-still-filters" role="group" aria-label="表示する静止画">
-          {STILL_IMAGE_FILTERS.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`vs-tab ${filter === item.key ? "active" : ""}`}
-              aria-pressed={filter === item.key}
-              onClick={() => setFilter(item.key)}
-            >
-              {item.label} {stillImages.filter(item.matches).length}
-            </button>
-          ))}
-        </div>
+      <FoldToolbar
+        title={`静止画（${stillImages.length}枚）`}
+        filterLabel="表示する静止画"
+        filters={STILL_IMAGE_FILTERS}
+        items={stillImages}
+        filterKey={fold.filterKey}
+        onFilterChange={fold.setFilterKey}
+      >
         <button className="vs-btn" disabled={showCreate} onClick={() => setCreating(true)}>
           ＋ 静止画を追加
         </button>
-      </div>
+      </FoldToolbar>
 
       {showCreate && (
         <div className="vs-card">
@@ -3696,7 +3836,7 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
                   setCreating(false);
                   await reload();
                   // 追加した1枚を開いて、そこまで画面を送る。続けて合成の操作に移れる。
-                  openStillImage(created.id, { always: true });
+                  fold.open(created.id, { always: true });
                 } catch (e) {
                   setError(e instanceof Error ? e.message : String(e));
                 }
@@ -3713,72 +3853,47 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
         </div>
       )}
 
-      {loaded && stillImages.length > 0 && shownCount === 0 && (
-        <p className="vs-muted">{activeFilter.label}の静止画はありません。</p>
+      {loaded && stillImages.length > 0 && fold.shownCount === 0 && (
+        <p className="vs-muted">{fold.activeFilter.label}の静止画はありません。</p>
       )}
-      <div className="vs-still-list">
+      <div className="vs-fold-list">
         {stillImages.map((stillImage) => {
-          const open = stillImage.id === openId;
           const background = backgrounds.find((b) => b.id === stillImage.background_asset_id);
-          const names = characterNames(stillImage);
           return (
-            <section
+            <FoldRow
               key={stillImage.id}
-              id={`still-image-${stillImage.id}`}
-              className={`vs-still-item ${open ? "open" : ""}`}
-              hidden={!isShown(stillImage)}
+              rowId={fold.rowId(stillImage.id)}
+              open={stillImage.id === fold.openId}
+              hidden={!fold.isShown(stillImage)}
+              onToggle={() => fold.toggle(stillImage.id)}
+              thumbnailSrc={stillImage.has_image ? api.stillImageSrc(stillImage) : null}
+              title={`#${stillImage.ordinal} ${stillImage.name || "（無題）"}`}
+              meta={`背景: ${background?.name ?? "なし"} ／ 人物: ${characterNames(stillImage, characters) || "なし"}`}
+              status={<StillImageStatus stillImage={stillImage} progress={composing[stillImage.id]} />}
             >
-              <button
-                type="button"
-                className="vs-still-row"
-                aria-expanded={open}
-                aria-controls={`still-image-body-${stillImage.id}`}
-                onClick={() => openStillImage(open ? null : stillImage.id, open ? null : { always: false })}
-              >
-                <span className="vs-still-row-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
-                {stillImage.has_image ? (
-                  <img
-                    className="vs-still-row-thumb"
-                    src={api.stillImageSrc(stillImage)}
-                    alt=""
-                    loading="lazy"
-                  />
-                ) : (
-                  <span className="vs-still-row-thumb empty" />
-                )}
-                <span className="vs-still-row-text">
-                  <strong>#{stillImage.ordinal} {stillImage.name || "（無題）"}</strong>
-                  <span className="vs-muted">
-                    背景: {background?.name ?? "なし"} ／ 人物: {names || "なし"}
-                  </span>
-                </span>
-                <StillImageStatus stillImage={stillImage} progress={composing[stillImage.id]} />
-              </button>
-              {mountedIds.has(stillImage.id) && (
-                <div id={`still-image-body-${stillImage.id}`} hidden={!open}>
-                  <StillImageCard
-                    stillImage={stillImage}
-                    projectName={projectName}
-                    characters={characters}
-                    backgrounds={backgrounds}
-                    onChanged={reload}
-                    onEnlarge={() => {
-                      const shown = stillImages.filter((item) => item.has_image);
-                      stillImageLightbox.openGallery(
-                        shown.map((item) => ({
-                          src: api.stillImageSrc(item),
-                          caption: `静止画 #${item.ordinal} ${item.name || "（無題）"}`,
-                        })),
-                        shown.findIndex((item) => item.id === stillImage.id),
-                      );
-                    }}
-                    onComposeProgress={reportComposeProgress}
-                    maxCharacters={maxCharacters}
-                    frame={frame}
-                  />
-                </div>
+              {fold.isMounted(stillImage.id) && (
+                <StillImageCard
+                  stillImage={stillImage}
+                  projectName={projectName}
+                  characters={characters}
+                  backgrounds={backgrounds}
+                  onChanged={reload}
+                  onEnlarge={() => {
+                    const shown = stillImages.filter((item) => item.has_image);
+                    stillImageLightbox.openGallery(
+                      shown.map((item) => ({
+                        src: api.stillImageSrc(item),
+                        caption: `静止画 #${item.ordinal} ${item.name || "（無題）"}`,
+                      })),
+                      shown.findIndex((item) => item.id === stillImage.id),
+                    );
+                  }}
+                  onComposeProgress={reportComposeProgress}
+                  maxCharacters={maxCharacters}
+                  frame={frame}
+                />
               )}
-            </section>
+            </FoldRow>
           );
         })}
       </div>
@@ -4701,11 +4816,17 @@ function SceneCutsCard({
   stillImage,
   projectName,
   people,
+  onShotsChanged,
+  onVideoProgress,
 }: {
   stillImage: StillImage;
   projectName: string;
   /** この静止画に写っている人物（セリフの話す人の候補）。 */
   people: ScenePerson[];
+  /** カットを読み直したとき。一覧の行に出すカットと動画の数を、そろえてもらう。 */
+  onShotsChanged: () => Promise<void>;
+  /** 動画生成の進み具合（生成していないときは null）。閉じている間も一覧の行に出すために知らせる。 */
+  onVideoProgress: (stillImageId: string, progress: number | null) => void;
 }) {
   const [shots, setShots] = useState<api.Shot[]>([]);
   // 追加したばかりのカット。その動きの指示の欄へ移って、続けて書けるようにする。
@@ -4715,27 +4836,28 @@ function SceneCutsCard({
   const [engine, setEngine] = useRememberedSetting("video_engine");
   const [error, setError] = useState<string | null>(null);
   const video = useJobRunner();
+  useEffect(() => {
+    onVideoProgress(stillImage.id, video.running ? video.progress : null);
+  }, [stillImage.id, video.running, video.progress, onVideoProgress]);
   const deletion = useDeletion(setError);
   const lightbox = useLightbox();
 
   const reloadShots = useCallback(async () => {
     try {
       setShots(await api.listShots(stillImage.id));
+      await onShotsChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [stillImage.id]);
+  }, [stillImage.id, onShotsChanged]);
 
   useEffect(() => {
     void reloadShots();
   }, [reloadShots]);
 
+  // 名前とカットの数は一覧の行に出ているので、ここには中身だけを置く。
   return (
-    <div className="vs-card">
-      <div className="vs-head" style={{ marginBottom: 12 }}>
-        <h2 style={{ fontSize: 19 }}>#{stillImage.ordinal} {stillImage.name || "（無題）"}</h2>
-        <span className="vs-pill">{shots.length ? `カット ${shots.length}件` : "カットなし"}</span>
-      </div>
+    <div>
       {error && <div className="vs-error">{error}</div>}
 
       {/* このシーンの起点になる1枚を、カットのそばに出しておく。 */}
@@ -4811,12 +4933,50 @@ function SceneCutsCard({
   );
 }
 
-/** 作った静止画を1つずつシーンにして、カットを足していく画面。 */
+/** シーンの動画がそろったか。カットがあり、どのカットにも動画がある。 */
+function sceneComplete(stillImage: StillImage): boolean {
+  return stillImage.shot_count > 0 && stillImage.shot_video_count === stillImage.shot_count;
+}
+
+const SCENE_FILTERS: FoldFilter<StillImage>[] = [
+  { key: "all", label: "すべて", matches: () => true },
+  { key: "unfinished", label: "未完成", matches: (item) => !sceneComplete(item) },
+  { key: "complete", label: "完成", matches: sceneComplete },
+];
+
+/** シーンの行に出す状態。動画を生成中かどうかはカードが知らせてくる。 */
+function SceneStatus({ stillImage, progress }: { stillImage: StillImage; progress?: number }) {
+  if (progress !== undefined) {
+    return <StatusPill tone="idle">動画を生成中 {Math.round(progress * 100)}%</StatusPill>;
+  }
+  if (!stillImage.has_image) return <StatusPill tone="warn">静止画が未合成</StatusPill>;
+  if (stillImage.shot_count === 0) return <StatusPill tone="idle">カットなし</StatusPill>;
+  return (
+    <StatusPill tone={sceneComplete(stillImage) ? "ok" : "idle"}>
+      動画 {stillImage.shot_video_count}/{stillImage.shot_count}
+    </StatusPill>
+  );
+}
+
+/**
+ * 作った静止画を1つずつシーンにして、カットを足していく画面。
+ *
+ * 静止画の画面と同じく、1行に1シーンで並べ、開くのは1つだけにする。
+ */
 function ScenesTab({ projectId, projectName }: { projectId: string; projectName: string }) {
   const [stillImages, setStillImages] = useState<StillImage[]>([]);
   // セリフの話す人を名前で選べるようにする。
   const [characters, setCharacters] = useState<api.Character[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fold = useFoldList({
+    name: "scene",
+    projectId,
+    items: stillImages,
+    loaded,
+    filters: SCENE_FILTERS,
+  });
+  const [generating, reportVideoProgress] = useProgressByItem();
 
   const reload = useCallback(async () => {
     try {
@@ -4826,6 +4986,7 @@ function ScenesTab({ projectId, projectName }: { projectId: string; projectName:
       ]);
       setStillImages(images);
       setCharacters(people);
+      setLoaded(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -4838,33 +4999,61 @@ function ScenesTab({ projectId, projectName }: { projectId: string; projectName:
   return (
     <div>
       {error && <div className="vs-error">{error}</div>}
-      <div className="vs-card">
-        <h2>シーン</h2>
-        <p className="vs-muted">
-          静止画1枚が1つのシーンになります。動かしたい静止画にカットを足して、順番に動画を作ります。
-          シーンを増やしたいときは「静止画」の画面で静止画を作ってください。
-        </p>
-      </div>
+      <FoldToolbar
+        title={`シーン（${stillImages.length}件）`}
+        filterLabel="表示するシーン"
+        filters={SCENE_FILTERS}
+        items={stillImages}
+        filterKey={fold.filterKey}
+        onFilterChange={fold.setFilterKey}
+      />
+      <p className="vs-muted vs-fold-lead">
+        静止画1枚が1つのシーンになります。動かしたい静止画にカットを足して、順番に動画を作ります。
+        シーンを増やしたいときは「静止画」の画面で静止画を作ってください。
+      </p>
 
-      {stillImages.length === 0 && (
+      {loaded && stillImages.length === 0 && (
         <div className="vs-card">
           <div className="vs-muted">
             まだ静止画がありません。「静止画」の画面で1枚作るところから始めてください。
           </div>
         </div>
       )}
+      {loaded && stillImages.length > 0 && fold.shownCount === 0 && (
+        <p className="vs-muted">{fold.activeFilter.label}のシーンはありません。</p>
+      )}
 
-      {stillImages.map((stillImage) => (
-        <SceneCutsCard
-          key={stillImage.id}
-          stillImage={stillImage}
-          projectName={projectName}
-          people={stillImage.character_ids.flatMap((id) => {
-            const person = characters.find((character) => character.id === id);
-            return person ? [{ id: person.id, name: person.name }] : [];
-          })}
-        />
-      ))}
+      <div className="vs-fold-list">
+        {stillImages.map((stillImage) => {
+          const names = characterNames(stillImage, characters);
+          return (
+            <FoldRow
+              key={stillImage.id}
+              rowId={fold.rowId(stillImage.id)}
+              open={stillImage.id === fold.openId}
+              hidden={!fold.isShown(stillImage)}
+              onToggle={() => fold.toggle(stillImage.id)}
+              thumbnailSrc={stillImage.has_image ? api.stillImageSrc(stillImage) : null}
+              title={`#${stillImage.ordinal} ${stillImage.name || "（無題）"}`}
+              meta={`カット ${stillImage.shot_count}件 ／ 人物: ${names || "なし"}`}
+              status={<SceneStatus stillImage={stillImage} progress={generating[stillImage.id]} />}
+            >
+              {fold.isMounted(stillImage.id) && (
+                <SceneCutsCard
+                  stillImage={stillImage}
+                  projectName={projectName}
+                  people={stillImage.character_ids.flatMap((id) => {
+                    const person = characters.find((character) => character.id === id);
+                    return person ? [{ id: person.id, name: person.name }] : [];
+                  })}
+                  onShotsChanged={reload}
+                  onVideoProgress={reportVideoProgress}
+                />
+              )}
+            </FoldRow>
+          );
+        })}
+      </div>
     </div>
   );
 }
