@@ -2909,6 +2909,7 @@ function StillImageCard({
   backgrounds,
   onChanged,
   onEnlarge,
+  onComposeProgress,
   maxCharacters,
   frame,
 }: {
@@ -2919,6 +2920,8 @@ function StillImageCard({
   onChanged: () => Promise<void>;
   /** 出来上がった静止画を拡大する。一覧の側で開き、前後の静止画へ送れるようにする。 */
   onEnlarge: () => void;
+  /** 合成の進み具合（合成していないときは null）。閉じている間も一覧の行に出すために知らせる。 */
+  onComposeProgress: (stillImageId: string, progress: number | null) => void;
   maxCharacters: number | null;
   /** 出来上がる静止画の大きさ。人物を置く枠はこの縦横比にする。まだ読めていない間は null。 */
   frame: { width: number; height: number } | null;
@@ -2934,6 +2937,9 @@ function StillImageCard({
   const [quality, setQuality] = useRememberedSetting("composition_quality");
   const [error, setError] = useState<string | null>(null);
   const compose = useJobRunner();
+  useEffect(() => {
+    onComposeProgress(stillImage.id, compose.running ? compose.progress : null);
+  }, [stillImage.id, compose.running, compose.progress, onComposeProgress]);
   const deletion = useDeletion(setError);
   // 保存は中身を受け取ってから行うので、その間を出す。
   const [saving, setSaving] = useState(false);
@@ -3105,34 +3111,31 @@ function StillImageCard({
       : "";
   const sourceLightbox = useLightbox();
 
+  // 名前と状態は一覧の行に出ているので、ここには操作だけを置く。
   return (
-    <div className="vs-card">
-      <div className="vs-head" style={{ marginBottom: 12 }}>
-        <h2 style={{ fontSize: 19 }}>#{stillImage.ordinal} {stillImage.name || "（無題）"}</h2>
-        <div className="vs-row">
-          <span className="vs-pill">{stillImage.has_image ? "合成済み" : "未合成"}</span>
-          <button
-            className="vs-btn danger"
-            onClick={() => void deletion.ask(async () => {
-              const preview = await api.getStillImageDeletionPreview(stillImage.id);
-              const items: string[] = [];
-              if (preview.shot_count) items.push(`カット ${preview.shot_count}件`);
-              if (preview.video_count) items.push(`生成済みの動画 ${preview.video_count}件`);
-              if (preview.has_image) items.push("合成した静止画");
-              return {
-                title: `静止画「${preview.name || `#${preview.ordinal}`}」を削除しますか？`,
-                lead: "この静止画と、そこから作ったものを削除します。元には戻せません。",
-                items,
-                perform: async () => {
-                  await api.deleteStillImage(stillImage.id);
-                  await onChanged();
-                },
-              };
-            })}
-          >
-            静止画を削除
-          </button>
-        </div>
+    <div className="vs-still-body">
+      <div className="vs-still-body-actions">
+        <button
+          className="vs-btn danger"
+          onClick={() => void deletion.ask(async () => {
+            const preview = await api.getStillImageDeletionPreview(stillImage.id);
+            const items: string[] = [];
+            if (preview.shot_count) items.push(`カット ${preview.shot_count}件`);
+            if (preview.video_count) items.push(`生成済みの動画 ${preview.video_count}件`);
+            if (preview.has_image) items.push("合成した静止画");
+            return {
+              title: `静止画「${preview.name || `#${preview.ordinal}`}」を削除しますか？`,
+              lead: "この静止画と、そこから作ったものを削除します。元には戻せません。",
+              items,
+              perform: async () => {
+                await api.deleteStillImage(stillImage.id);
+                await onChanged();
+              },
+            };
+          })}
+        >
+          静止画を削除
+        </button>
       </div>
       {error && <div className="vs-error">{error}</div>}
       {/* 合成に渡る素材をそのまま並べる。人物は、この静止画で実際に使う立ち絵を出す。 */}
@@ -3488,16 +3491,80 @@ function StillImageCard({
   );
 }
 
+// 作品ごとに、開いていた静止画。タブを行き来しても、起動し直しても、同じ1枚から続けられるようにする。
+const OPEN_STILL_IMAGE_KEY = "chotto-sashie.open-still-image";
+
+type StillImageFilter = "all" | "pending" | "composed";
+
+const STILL_IMAGE_FILTERS: { key: StillImageFilter; label: string; matches: (item: StillImage) => boolean }[] = [
+  { key: "all", label: "すべて", matches: () => true },
+  { key: "pending", label: "未合成", matches: (item) => !item.has_image },
+  { key: "composed", label: "合成済み", matches: (item) => item.has_image },
+];
+
+/** 一覧の行に出す状態。合成中かどうかはカードが知らせてくる。 */
+function StillImageStatus({ stillImage, progress }: { stillImage: StillImage; progress?: number }) {
+  if (progress !== undefined) {
+    return <StatusPill tone="idle">合成中 {Math.round(progress * 100)}%</StatusPill>;
+  }
+  if (stillImage.has_image) return <StatusPill tone="ok">合成済み</StatusPill>;
+  if (!stillImage.can_compose) return <StatusPill tone="warn">合成できません</StatusPill>;
+  return <StatusPill tone="idle">未合成</StatusPill>;
+}
+
 /**
  * 静止画の一覧と、新しい静止画を作るところ。
  *
  * 挿絵として使うならここが完成地点で、動画を作る場合はこの1枚が「シーン」の起点になる。
+ *
+ * 枚数が増えても目当ての1枚へすぐ行けるよう、一覧は1行に1枚で並べ、開くのは1枚だけにする。
+ * 追加した静止画はその場で開き、そこまで画面を送る（末尾に足されて操作が遠くならないように）。
  */
 function StillImagesTab({ projectId, projectName }: { projectId: string; projectName: string }) {
   const [stillImages, setStillImages] = useState<StillImage[]>([]);
   const [characters, setCharacters] = useState<api.Character[]>([]);
   const [backgrounds, setBackgrounds] = useState<api.Asset[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const openKey = `${OPEN_STILL_IMAGE_KEY}.${projectId}`;
+  const [openId, setOpenId] = useState<string | null>(() => window.localStorage.getItem(openKey));
+  // 一度開いた静止画のカードは、閉じても描いたままにする。書きかけの指定・置いた位置と、
+  // 合成の進み具合はカードが持っているので、外すと消えてしまう。開いたことのない静止画は
+  // 行だけを出し、立ち絵などはまだ読まない。
+  const [mountedIds, setMountedIds] = useState<Set<string>>(
+    () => new Set(openId ? [openId] : []),
+  );
+  // 開いたあとに画面を送る先。always でなければ、行が画面の上へ外れたときだけ送る。
+  const scrollTarget = useRef<{ id: string; always: boolean } | null>(
+    openId ? { id: openId, always: true } : null,
+  );
+  const [filter, setFilter] = useState<StillImageFilter>("all");
+  const [creating, setCreating] = useState(false);
+  const [composing, setComposing] = useState<Record<string, number>>({});
+
+  const openStillImage = (id: string | null, scroll: { always: boolean } | null) => {
+    setOpenId(id);
+    if (id) {
+      setMountedIds((current) => (current.has(id) ? current : new Set(current).add(id)));
+      window.localStorage.setItem(openKey, id);
+    } else {
+      window.localStorage.removeItem(openKey);
+    }
+    scrollTarget.current = id && scroll ? { id, always: scroll.always } : null;
+  };
+
+  const reportComposeProgress = useCallback((id: string, progress: number | null) => {
+    setComposing((current) => {
+      if (progress === null) {
+        if (!(id in current)) return current;
+        const rest = { ...current };
+        delete rest[id];
+        return rest;
+      }
+      return current[id] === progress ? current : { ...current, [id]: progress };
+    });
+  }, []);
 
   const [name, setName] = useState("");
   const [bg, setBg] = useState("");
@@ -3525,6 +3592,7 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
       setStillImages(await api.listStillImages(projectId));
       setCharacters(await api.listCharacters(projectId));
       setBackgrounds(await api.listAssets(projectId, "background-assets"));
+      setLoaded(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -3534,76 +3602,186 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
     void reload();
   }, [reload]);
 
+  // 覚えていた静止画が削除されていたら、何も開いていない状態に戻す。
+  useEffect(() => {
+    if (loaded && openId && !stillImages.some((item) => item.id === openId)) {
+      setOpenId(null);
+      window.localStorage.removeItem(openKey);
+    }
+  }, [loaded, openId, stillImages, openKey]);
+
+  // 開いた行が見える位置まで画面を送る。前に開いていたカードが閉じると、行が上へずれるため。
+  useEffect(() => {
+    const target = scrollTarget.current;
+    if (!target) return;
+    const row = document.getElementById(`still-image-${target.id}`);
+    if (!row) return;
+    scrollTarget.current = null;
+    if (target.always || row.getBoundingClientRect().top < 0) {
+      row.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }, [openId, stillImages]);
+
   const newOverLimit = maxCharacters !== null && charIds.length > maxCharacters;
+  // 1枚も無いうちは、作成欄を開いた状態で出す。
+  const showCreate = creating || (loaded && stillImages.length === 0);
+  const activeFilter = STILL_IMAGE_FILTERS.find((item) => item.key === filter) ?? STILL_IMAGE_FILTERS[0];
+  // 開いている1枚は、絞り込みに合わなくなっても出したままにする（合成し終えた途端に消えないように）。
+  const isShown = (item: StillImage) => item.id === openId || activeFilter.matches(item);
+  const shownCount = stillImages.filter(isShown).length;
+  const characterNames = (item: StillImage) =>
+    item.character_ids
+      .map((id) => characters.find((c) => c.id === id)?.name)
+      .filter((value): value is string => Boolean(value))
+      .join("、");
 
   return (
     <div>
       {error && <div className="vs-error">{error}</div>}
-      <div className="vs-card">
-        <h2>静止画を作成</h2>
-        <p className="vs-muted">
-          背景と、登場人物の立ち絵を1枚に合成します。ここで出来上がった1枚が挿絵になります。
-        </p>
-        <div className="vs-field">
-          <label>名前</label>
-          <input className="vs-input" value={name} onChange={(e) => setName(e.target.value)} />
+      <div className="vs-still-toolbar">
+        <h2>静止画（{stillImages.length}枚）</h2>
+        <div className="vs-row vs-still-filters" role="group" aria-label="表示する静止画">
+          {STILL_IMAGE_FILTERS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`vs-tab ${filter === item.key ? "active" : ""}`}
+              aria-pressed={filter === item.key}
+              onClick={() => setFilter(item.key)}
+            >
+              {item.label} {stillImages.filter(item.matches).length}
+            </button>
+          ))}
         </div>
-        <CompositionPicker
-          characters={characters}
-          backgrounds={backgrounds}
-          backgroundId={bg}
-          characterIds={charIds}
-          onChange={(next) => {
-            setBg(next.backgroundId);
-            setCharIds(next.characterIds);
-          }}
-          maxCharacters={maxCharacters}
-        />
-        <button
-          className="vs-btn"
-          disabled={newOverLimit}
-          onClick={() => void (async () => {
-            try {
-              await api.createStillImage(projectId, {
-                name,
-                background_asset_id: bg || null,
-                character_ids: charIds,
-              });
-              setName("");
-              setBg("");
-              setCharIds([]);
-              await reload();
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e));
-            }
-          })()}
-        >
-          静止画を追加
+        <button className="vs-btn" disabled={showCreate} onClick={() => setCreating(true)}>
+          ＋ 静止画を追加
         </button>
       </div>
 
-      {stillImages.map((stillImage) => (
-        <StillImageCard
-          key={stillImage.id}
-          stillImage={stillImage}
-          projectName={projectName}
-          characters={characters}
-          backgrounds={backgrounds}
-          onChanged={reload}
-          onEnlarge={() => {
-            const shown = stillImages.filter((item) => item.has_image);
-            stillImageLightbox.openGallery(
-              shown.map((item) => ({
-                src: api.stillImageSrc(item),
-                caption: `静止画 #${item.ordinal} ${item.name || "（無題）"}`,
-              })),
-              shown.findIndex((item) => item.id === stillImage.id),
-            );
-          }}
-          maxCharacters={maxCharacters}
-          frame={frame}
-        />
-      ))}
+      {showCreate && (
+        <div className="vs-card">
+          <h2>静止画を作成</h2>
+          <p className="vs-muted">
+            背景と、登場人物の立ち絵を1枚に合成します。ここで出来上がった1枚が挿絵になります。
+          </p>
+          <div className="vs-field">
+            <label>名前</label>
+            <input className="vs-input" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <CompositionPicker
+            characters={characters}
+            backgrounds={backgrounds}
+            backgroundId={bg}
+            characterIds={charIds}
+            onChange={(next) => {
+              setBg(next.backgroundId);
+              setCharIds(next.characterIds);
+            }}
+            maxCharacters={maxCharacters}
+          />
+          <div className="vs-row">
+            <button
+              className="vs-btn"
+              disabled={newOverLimit}
+              onClick={() => void (async () => {
+                try {
+                  const created = await api.createStillImage(projectId, {
+                    name,
+                    background_asset_id: bg || null,
+                    character_ids: charIds,
+                  });
+                  setName("");
+                  setBg("");
+                  setCharIds([]);
+                  setCreating(false);
+                  await reload();
+                  // 追加した1枚を開いて、そこまで画面を送る。続けて合成の操作に移れる。
+                  openStillImage(created.id, { always: true });
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                }
+              })()}
+            >
+              静止画を追加
+            </button>
+            {stillImages.length > 0 && (
+              <button className="vs-btn ghost" onClick={() => setCreating(false)}>
+                やめる
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {loaded && stillImages.length > 0 && shownCount === 0 && (
+        <p className="vs-muted">{activeFilter.label}の静止画はありません。</p>
+      )}
+      <div className="vs-still-list">
+        {stillImages.map((stillImage) => {
+          const open = stillImage.id === openId;
+          const background = backgrounds.find((b) => b.id === stillImage.background_asset_id);
+          const names = characterNames(stillImage);
+          return (
+            <section
+              key={stillImage.id}
+              id={`still-image-${stillImage.id}`}
+              className={`vs-still-item ${open ? "open" : ""}`}
+              hidden={!isShown(stillImage)}
+            >
+              <button
+                type="button"
+                className="vs-still-row"
+                aria-expanded={open}
+                aria-controls={`still-image-body-${stillImage.id}`}
+                onClick={() => openStillImage(open ? null : stillImage.id, open ? null : { always: false })}
+              >
+                <span className="vs-still-row-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+                {stillImage.has_image ? (
+                  <img
+                    className="vs-still-row-thumb"
+                    src={api.stillImageSrc(stillImage)}
+                    alt=""
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="vs-still-row-thumb empty" />
+                )}
+                <span className="vs-still-row-text">
+                  <strong>#{stillImage.ordinal} {stillImage.name || "（無題）"}</strong>
+                  <span className="vs-muted">
+                    背景: {background?.name ?? "なし"} ／ 人物: {names || "なし"}
+                  </span>
+                </span>
+                <StillImageStatus stillImage={stillImage} progress={composing[stillImage.id]} />
+              </button>
+              {mountedIds.has(stillImage.id) && (
+                <div id={`still-image-body-${stillImage.id}`} hidden={!open}>
+                  <StillImageCard
+                    stillImage={stillImage}
+                    projectName={projectName}
+                    characters={characters}
+                    backgrounds={backgrounds}
+                    onChanged={reload}
+                    onEnlarge={() => {
+                      const shown = stillImages.filter((item) => item.has_image);
+                      stillImageLightbox.openGallery(
+                        shown.map((item) => ({
+                          src: api.stillImageSrc(item),
+                          caption: `静止画 #${item.ordinal} ${item.name || "（無題）"}`,
+                        })),
+                        shown.findIndex((item) => item.id === stillImage.id),
+                      );
+                    }}
+                    onComposeProgress={reportComposeProgress}
+                    maxCharacters={maxCharacters}
+                    frame={frame}
+                  />
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
       {stillImageLightbox.node}
     </div>
   );
