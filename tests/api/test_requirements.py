@@ -33,6 +33,8 @@ def test_check_requirements_reports_missing(tmp_path: Path) -> None:
         "ModelSamplingAuraFlow", "CFGNorm", "FluxKontextImageScale",
         "TextEncodeQwenImageEditPlus", "FluxKontextMultiReferenceLatentMethod",
         "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage",
+        "LoadBackgroundRemovalModel", "RemoveBackground", "MaskToImage",
+        "LoadImageMask", "VAEEncode", "SetLatentNoiseMask", "DifferentialDiffusion",
     }
     object_info = _object_info(
         nodes=composition_nodes,
@@ -61,6 +63,26 @@ def test_check_requirements_reports_missing(tmp_path: Path) -> None:
     # Wanのモデルはローダー(UNETLoader)自体はあるが未導入 → missing。
     assert all(not model.present for model in i2v.models)
     assert i2v.ready is False
+
+
+def test_check_requirements_reads_the_new_style_model_list() -> None:
+    """背景除去のローダーは、候補を ["COMBO", {"options": [...]}] の形で返す。"""
+    manifest = load_requirements(Path("model-manifests/video-requirements.json"))
+    object_info = {
+        "LoadBackgroundRemovalModel": {
+            "input": {
+                "required": {
+                    "bg_removal_name": ["COMBO", {"options": ["birefnet.safetensors"]}]
+                }
+            }
+        }
+    }
+
+    report = check_requirements(object_info, manifest)
+
+    composition = next(c for c in report.capabilities if c.id == "composition")
+    removal = next(m for m in composition.models if m.file == "birefnet.safetensors")
+    assert removal.present is True
 
 
 def _tool_present(tool_id: str, display_name: str) -> RequirementToolStatus:

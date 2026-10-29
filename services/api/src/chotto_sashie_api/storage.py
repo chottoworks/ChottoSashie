@@ -20,6 +20,11 @@ def still_image_dir(data_dir: Path) -> Path:
     return data_dir / "keyframes"
 
 
+def still_image_pose_dir(data_dir: Path) -> Path:
+    """置いて合成するときの、静止画ごとの人物の姿（切り抜いた透過PNG）。"""
+    return data_dir / "still-image-poses"
+
+
 def shot_video_dir(data_dir: Path) -> Path:
     """カットの動画。"""
     return data_dir / "videos"

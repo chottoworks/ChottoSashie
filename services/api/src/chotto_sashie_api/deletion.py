@@ -269,6 +269,7 @@ def delete_character(database: Database, data_dir: Path, character_id: str) -> N
         if found is None:
             raise KeyError(character_id)
         # 立ち絵の実体はこの記録の持ち物なので、人物ごと消すときにここで片付ける。
+        # 静止画ごとの姿も、人物を消すと行が外部キーで消えるので一緒に片付ける。
         paths = [
             Path(row["path"])
             for row in connection.execute(
@@ -276,8 +277,10 @@ def delete_character(database: Database, data_dir: Path, character_id: str) -> N
                 SELECT image_path AS path FROM character_figures WHERE character_id = ?
                 UNION ALL
                 SELECT image_path AS path FROM character_figure_edits WHERE character_id = ?
+                UNION ALL
+                SELECT pose_image_path AS path FROM still_image_characters WHERE character_id = ?
                 """,
-                (character_id, character_id),
+                (character_id, character_id, character_id),
             ).fetchall()
             if row["path"]
         ]
@@ -322,6 +325,15 @@ def delete_still_image(database: Database, data_dir: Path, still_image_id: str) 
         if still_image is None:
             raise KeyError(still_image_id)
         paths = [Path(still_image["image_path"])] if still_image["image_path"] else []
+        # 人物の姿は静止画ごとの記録の持ち物。行は外部キーで一緒に消えるので、実体だけ集める。
+        paths.extend(
+            Path(row["path"])
+            for row in connection.execute(
+                "SELECT pose_image_path AS path FROM still_image_characters "
+                "WHERE still_image_id = ? AND pose_image_path != ''",
+                (still_image_id,),
+            ).fetchall()
+        )
         paths.extend(_shot_paths(connection, "still_image_id", still_image_id))
         connection.execute("DELETE FROM still_images WHERE id = ?", (still_image_id,))
     for path in paths:
@@ -391,6 +403,10 @@ def _project_file_paths(database: Database, project_id: str) -> list[Path]:
         "SELECT image_path AS path FROM background_assets WHERE project_id = ?",
         "SELECT image_path AS path FROM prop_assets WHERE project_id = ?",
         "SELECT image_path AS path FROM still_images WHERE project_id = ?",
+        """
+        SELECT p.pose_image_path AS path FROM still_image_characters p
+        JOIN still_images sc ON sc.id = p.still_image_id WHERE sc.project_id = ?
+        """,
         """
         SELECT f.image_path AS path FROM character_figures f
         JOIN characters c ON c.id = f.character_id WHERE c.project_id = ?

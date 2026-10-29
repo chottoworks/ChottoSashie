@@ -59,7 +59,7 @@ def _still_image_with_image(client: TestClient) -> str:
     image_dir.mkdir(parents=True, exist_ok=True)
     image_file = image_dir / f"{still_image_id}.png"
     image_file.write_bytes(_TINY_PNG)
-    StillImageRepository(main.database).set_image(still_image_id, image_file)
+    StillImageRepository(main.database).set_image(still_image_id, image_file, source_prompt="")
     return still_image_id
 
 

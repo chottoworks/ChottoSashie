@@ -121,7 +121,7 @@ def test_project_deletion_preview_and_delete(
     image_file = data_dir / "keyframes" / f"{still_image['id']}.png"
     image_file.parent.mkdir(parents=True, exist_ok=True)
     image_file.write_bytes(b"png")
-    main.StillImageRepository(main.database).set_image(still_image["id"], image_file)
+    main.StillImageRepository(main.database).set_image(still_image["id"], image_file, source_prompt="")
 
     preview = client.get(f"/api/v1/projects/{project_id}/deletion-preview").json()
     assert preview["character_count"] == 1
@@ -160,7 +160,7 @@ def test_project_deletion_keeps_files_outside_the_managed_folder(
     outside = tmp_path / "existing-comfyui" / "output" / "keep.png"
     outside.parent.mkdir(parents=True, exist_ok=True)
     outside.write_bytes(b"keep")
-    main.StillImageRepository(main.database).set_image(still_image["id"], outside)
+    main.StillImageRepository(main.database).set_image(still_image["id"], outside, source_prompt="")
 
     assert client.delete(f"/api/v1/projects/{project_id}").status_code == 204
     assert outside.exists()

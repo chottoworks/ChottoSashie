@@ -24,6 +24,7 @@ MODEL_DIRECTORY_ALIASES: dict[str, tuple[str, ...]] = {
     "embeddings": ("embeddings",),
     "audio_encoders": ("audio_encoders", "audioencoders"),
     "model_patches": ("model_patches",),
+    "background_removal": ("background_removal",),
 }
 
 

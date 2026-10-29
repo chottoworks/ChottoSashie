@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import * as api from "./api";
 import type { AssetKind, Project, StillImage } from "./api";
 import { CharacterStudio } from "./CharacterStudio";
@@ -2467,6 +2467,339 @@ function StillImageCharacterPanel({
   );
 }
 
+/** 姿を作るのに使う指定だけを並べた文字列。配置は姿ではなく、置く位置で決める。 */
+function posingKey(spec: api.StillImageCharacterSpec): string {
+  return JSON.stringify([spec.pose, spec.expression, spec.direction, spec.notes]);
+}
+
+/** 姿を作ったときの指定と、画面に出ている指定が違うか（「姿を作る」を押すまで姿は前のまま）。 */
+function poseDraftDiffers(info: api.StillImageCharacter | undefined, spec: api.StillImageCharacterSpec): boolean {
+  return Boolean(info?.pose_spec) && posingKey(info!.pose_spec!) !== posingKey(spec);
+}
+
+/**
+ * 置いて合成するときの、1人ぶんの姿づくり。
+ *
+ * 立ち絵1枚にポーズ・向き・表情を付けて切り抜く。1人ずつ作るので指定は確実に効き、
+ * 崩れても合成の前にここで見て作り直せる。指定は「姿を作る」を押したときに保存する。
+ */
+function StillImagePosePanel({
+  stillImageId,
+  character,
+  info,
+  figures,
+  spec,
+  onSpecChange,
+  onChooseFigure,
+  beforeStart,
+  onPoseMade,
+}: {
+  stillImageId: string;
+  character: api.Character;
+  info?: api.StillImageCharacter;
+  figures: api.CharacterFigure[];
+  /** 画面に出ている指定。保存は姿を作るときに行う。 */
+  spec: api.StillImageCharacterSpec;
+  onSpecChange: (spec: api.StillImageCharacterSpec) => void;
+  onChooseFigure: (figureId: string) => Promise<void>;
+  /** 姿づくりを頼む前に待つもの（立ち絵の選び直しの保存）。 */
+  beforeStart: () => Promise<unknown>;
+  onPoseMade: () => Promise<void>;
+}) {
+  const figureId = chosenFigureId(info);
+  const [error, setError] = useState<string | null>(null);
+  const pose = useJobRunner();
+  const lightbox = useLightbox();
+  const differs = poseDraftDiffers(info, spec);
+  const empty = posingKey(spec) === posingKey(EMPTY_STILL_IMAGE_CHARACTER_SPEC);
+
+  const chooseFigure = async (next: string) => {
+    setError(null);
+    try {
+      await onChooseFigure(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const field = (key: "pose" | "expression" | "direction", label: string, placeholder: string) => (
+    <div>
+      <label>{label}</label>
+      <input
+        className="vs-input"
+        value={spec[key]}
+        onChange={(e) => onSpecChange({ ...spec, [key]: e.target.value })}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+
+  return (
+    <div className="vs-state-box">
+      <div className="vs-state-title">{character.name}</div>
+      {error && <div className="vs-error">{error}</div>}
+      {!info?.has_figure && (
+        <div className="vs-warn vs-block-reason">
+          この人物の立ち絵がありません。素材作成の「登場人物」タブで立ち絵を作ってください。
+        </div>
+      )}
+      {figures.length > 1 && (
+        <div className="vs-field">
+          <label>使う立ち絵</label>
+          <select
+            className="vs-select"
+            value={figureId}
+            onChange={(e) => void chooseFigure(e.target.value)}
+          >
+            <option value="">既定の立ち絵を使う</option>
+            {figures.map((figure, index) => (
+              <option key={figure.id} value={figure.id}>
+                {figure.label || `立ち絵${index + 1}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className="vs-pose-row">
+        <div className="vs-pose-figures">
+          {info?.figure_url && (
+            <figure>
+              <img
+                className="vs-pose-thumb"
+                src={api.apiUrl(info.figure_url)}
+                alt={`${character.name} の立ち絵`}
+                onClick={() => lightbox.open(api.apiUrl(info.figure_url!), `${character.name} の立ち絵`)}
+              />
+              <figcaption className="vs-muted">立ち絵</figcaption>
+            </figure>
+          )}
+          <figure>
+            {info?.pose_url ? (
+              <img
+                className="vs-pose-thumb vs-pose-cutout"
+                src={api.apiUrl(info.pose_url)}
+                alt={`${character.name} の姿`}
+                onClick={() => lightbox.open(api.apiUrl(info.pose_url!), `${character.name} の姿`)}
+              />
+            ) : (
+              <div className="vs-pose-thumb empty">
+                <span className="vs-muted">まだありません</span>
+              </div>
+            )}
+            <figcaption className="vs-muted">この静止画での姿</figcaption>
+          </figure>
+        </div>
+        <div className="vs-pose-fields">
+          <div className="vs-state-grid">
+            {field("pose", "ポーズ", "例: 椅子に座って右手をあげる")}
+            {field("expression", "表情", "例: 笑顔")}
+            {field("direction", "向き", "例: 右向き")}
+          </div>
+          <div className="vs-state-field">
+            <label>補足</label>
+            <input
+              className="vs-input"
+              value={spec.notes}
+              onChange={(e) => onSpecChange({ ...spec, notes: e.target.value })}
+              placeholder="上の項目に収まらない指定"
+            />
+          </div>
+          <div className="vs-state-actions">
+            <button
+              className="vs-btn"
+              disabled={pose.running || !info?.has_figure}
+              onClick={() =>
+                void pose.run(
+                  async () => {
+                    await beforeStart();
+                    const started = await api.makeStillImagePose(stillImageId, character.id, spec);
+                    return { job_id: started.job_id };
+                  },
+                  onPoseMade,
+                  setError,
+                )
+              }
+            >
+              {pose.running ? "作っています..." : info?.pose_url ? "姿を作り直す" : "姿を作る"}
+            </button>
+            {differs && !pose.running && (
+              <button className="vs-btn ghost" onClick={() => onSpecChange({ ...spec, ...info!.pose_spec!, placement: spec.placement })}>
+                書き換えを戻す
+              </button>
+            )}
+          </div>
+          {pose.running && (
+            <Progress value={pose.progress} label={pose.message} runner={pose} setError={setError} />
+          )}
+          <div className="vs-muted">
+            {empty
+              ? "空のままなら、立ち絵の姿勢・表情・向きのまま切り抜きます。"
+              : "立ち絵に指定を付けてから切り抜きます。1人あたり1分ほどかかります。"}
+          </div>
+          {differs && (
+            <div className="vs-warn">
+              指定を書き換えています。「姿を作り直す」を押すまで、合成には前の姿を使います。
+            </div>
+          )}
+          {!differs && info?.pose_outdated && (
+            <div className="vs-warn">
+              姿を作ったあとに立ち絵か指定が変わりました。「姿を作り直す」を押してください。
+            </div>
+          )}
+          {info?.pose_url && (
+            <UsedPrompt
+              summary="姿を作ったプロンプト"
+              lead="この姿を作ったときに ComfyUI へ渡したプロンプトです。"
+              prompt={info.pose_prompt || null}
+              missing={
+                info.pose_prompt === ""
+                  ? "指定が空だったので、プロンプトを使わずに立ち絵をそのまま切り抜きました。"
+                  : "この姿を作ったときのプロンプトは記録されていません。作り直すと記録されます。"
+              }
+            />
+          )}
+        </div>
+      </div>
+      {lightbox.node}
+    </div>
+  );
+}
+
+/** 生成に使ったプロンプト。長いので、開いたときだけ出す。 */
+function UsedPrompt({
+  summary,
+  lead,
+  prompt,
+  missing,
+}: {
+  summary: string;
+  lead: string;
+  /** 使ったプロンプト。無いときは missing を出す。 */
+  prompt: string | null;
+  missing: string;
+}) {
+  return (
+    <details className="vs-collapse">
+      <summary>{summary}</summary>
+      {prompt ? (
+        <>
+          <div className="vs-muted">{lead}</div>
+          <pre className="vs-prompt-preview">{prompt}</pre>
+        </>
+      ) : (
+        <div className="vs-muted">{missing}</div>
+      )}
+    </details>
+  );
+}
+
+/** 背景の上に置く1人。 */
+interface PlacedPerson {
+  id: string;
+  name: string;
+  /** 切り抜いた姿。まだ無ければ立ち絵を薄く出して、置く場所の目安にする。 */
+  src: string | null;
+  cutout: boolean;
+  layout: api.StillImageCharacterLayout;
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+/**
+ * 背景の上へ人物を置く。ドラッグで位置、頭の上のつまみで大きさを変える。
+ *
+ * 位置は出来上がる静止画に対する割合で持つ（足もとの位置と身長）。背景は出来上がりと同じ
+ * 縦横比の枠へ、隙間なく広げてはみ出しを中央で切る。APIが下書きを作るときと同じ見せ方
+ * なので、ここで置いた位置がそのまま下書きの位置になる。
+ */
+function PlacementEditor({
+  backgroundSrc,
+  frame,
+  people,
+  onChange,
+}: {
+  backgroundSrc: string;
+  frame: { width: number; height: number };
+  people: PlacedPerson[];
+  onChange: (id: string, layout: api.StillImageCharacterLayout) => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const drag = useRef<{
+    id: string;
+    mode: "move" | "size";
+    startX: number;
+    startY: number;
+    start: api.StillImageCharacterLayout;
+  } | null>(null);
+
+  const begin = (event: ReactPointerEvent, person: PlacedPerson, mode: "move" | "size") => {
+    event.preventDefault();
+    event.stopPropagation();
+    (event.currentTarget as Element).setPointerCapture(event.pointerId);
+    drag.current = { id: person.id, mode, startX: event.clientX, startY: event.clientY, start: person.layout };
+  };
+  const move = (event: ReactPointerEvent) => {
+    const current = drag.current;
+    const rect = box.current?.getBoundingClientRect();
+    if (!current || !rect) return;
+    const dx = (event.clientX - current.startX) / rect.width;
+    const dy = (event.clientY - current.startY) / rect.height;
+    onChange(
+      current.id,
+      current.mode === "move"
+        ? { ...current.start, x: clamp(current.start.x + dx, 0, 1), y: clamp(current.start.y + dy, 0, 1) }
+        : { ...current.start, height: clamp(current.start.height - dy, 0.05, 1.5) },
+    );
+  };
+  const end = () => {
+    drag.current = null;
+  };
+
+  // 足もとが下（手前）の人物ほど上に重ねる。下書きを作るときと同じ順。
+  const ordered = [...people].sort((a, b) => a.layout.y - b.layout.y);
+
+  return (
+    <div
+      ref={box}
+      className="vs-placement"
+      style={{ aspectRatio: `${frame.width} / ${frame.height}` }}
+    >
+      <img className="vs-placement-background" src={backgroundSrc} alt="背景" draggable={false} />
+      {ordered.map((person, index) => (
+        <div
+          key={person.id}
+          className={`vs-placement-person${person.cutout ? "" : " pending"}`}
+          style={{
+            left: `${person.layout.x * 100}%`,
+            top: `${(person.layout.y - person.layout.height) * 100}%`,
+            height: `${person.layout.height * 100}%`,
+            zIndex: index + 1,
+          }}
+          title={`${person.name}（ドラッグで動かす）`}
+          onPointerDown={(e) => begin(e, person, "move")}
+          onPointerMove={move}
+          onPointerUp={end}
+          onPointerCancel={end}
+        >
+          {person.src ? (
+            <img src={person.src} alt={person.name} draggable={false} />
+          ) : (
+            <span className="vs-placement-name">{person.name}</span>
+          )}
+          <span
+            className="vs-placement-handle"
+            title="上下にドラッグで大きさを変える"
+            onPointerDown={(e) => begin(e, person, "size")}
+            onPointerMove={move}
+            onPointerUp={end}
+            onPointerCancel={end}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** この組み合わせが使う参照画像の枚数。数え方はAPI側の合成と同じ。 */
 function referenceImageCount(backgroundId: string, characterIds: string[]): number {
   return characterIds.length + (backgroundId ? 1 : 0);
@@ -2577,6 +2910,7 @@ function StillImageCard({
   onChanged,
   onEnlarge,
   maxCharacters,
+  frame,
 }: {
   stillImage: StillImage;
   projectName: string;
@@ -2586,6 +2920,8 @@ function StillImageCard({
   /** 出来上がった静止画を拡大する。一覧の側で開き、前後の静止画へ送れるようにする。 */
   onEnlarge: () => void;
   maxCharacters: number | null;
+  /** 出来上がる静止画の大きさ。人物を置く枠はこの縦横比にする。まだ読めていない間は null。 */
+  frame: { width: number; height: number } | null;
 }) {
   const [charInfos, setCharInfos] = useState<api.StillImageCharacter[]>([]);
   // 画面に出ている人物ごとの指定。合成するときにこの内容を保存し、その内容で合成する。
@@ -2690,6 +3026,35 @@ function StillImageCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedSpecsKey]);
 
+  // 画面で置いた人物の位置。置いて合成するときにこの内容を保存し、その位置で合成する。
+  // 合成しなければ保存しない。保存済みの位置が変わったときだけ置き換える（指定と同じ扱い）。
+  const [layoutDrafts, setLayoutDrafts] = useState<Record<string, api.StillImageCharacterLayout>>({});
+  const savedLayoutsKey = JSON.stringify(charInfos.map((info) => [info.character_id, info.layout]));
+  const draftLayoutsKey = JSON.stringify(
+    charInfos.map((info) => [info.character_id, layoutDrafts[info.character_id] ?? info.layout]),
+  );
+  useEffect(() => {
+    setLayoutDrafts(Object.fromEntries(charInfos.map((info) => [info.character_id, info.layout])));
+    // savedLayoutsKey が変わったときだけ戻す。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedLayoutsKey]);
+
+  const placed = stillImage.composition_method === "placed";
+  const [switchingMethod, setSwitchingMethod] = useState(false);
+  /** 作り方を切り替える。静止画の設定なので、選んだときに保存する。 */
+  const chooseMethod = async (method: api.CompositionMethod) => {
+    setSwitchingMethod(true);
+    setError(null);
+    try {
+      await api.updateStillImage(stillImage.id, { composition_method: method });
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSwitchingMethod(false);
+    }
+  };
+
   // 立ち絵の選び直しの保存は、1本の列で順に送る。追い越しがあると、後から届いた古い選択で
   // 上書きされる。合成もこの列が空くのを待つ。
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
@@ -2730,6 +3095,14 @@ function StillImageCard({
     .filter((c): c is api.Character => Boolean(c));
   // 立ち絵が無い人物がいると合成できない。指定の欄を開いた状態で出す。
   const missingFigure = charInfos.some((info) => !info.has_figure);
+  // 姿が無いか、作り直しが要る人物がいる。姿の欄を開いた状態で出す。
+  const needsPose = charInfos.some((info) => !info.pose_url || info.pose_outdated);
+  // 画面で書き換えた指定がまだ姿になっていない。そのまま合成すると、画面と違う姿で合成される。
+  const draftBlockReason =
+    placed
+    && charInfos.some((info) => poseDraftDiffers(info, specDrafts[info.character_id] ?? info.spec))
+      ? "指定を書き換えた人物がいます。「姿を作り直す」を押すか、書き換えを戻してください"
+      : "";
   const sourceLightbox = useLightbox();
 
   return (
@@ -2877,61 +3250,189 @@ function StillImageCard({
             </div>
           )}
           {saved && <p className="vs-ok" style={{ marginTop: 8 }}>「{saved}」を保存しました。</p>}
+          {stillImage.has_image && (
+            <UsedPrompt
+              summary="合成に使ったプロンプト"
+              lead="この静止画を合成したときに ComfyUI へ渡したプロンプトです。"
+              prompt={stillImage.source_prompt || null}
+              missing="この静止画を合成したときのプロンプトは記録されていません。合成し直すと記録されます。"
+            />
+          )}
         </div>
 
         <div className="vs-still-controls">
+          {/* 作り方は静止画ごとに選ぶ。既定は背景となじみやすい指示文で合成。位置と大きさを決めたいときに置いて合成を選ぶ。 */}
           <div className="vs-field">
-            <label>合成の状況説明（任意）</label>
-            <textarea
-              className="vs-textarea"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={
-                stillImage.character_ids.length > 1
-                  ? "例: 二人で話している"
-                  : "例: 本を読んでいる"
-              }
-            />
-            {/* 姿勢・表情・向きは人物ごとの欄で指定する。ここは出来事や人物どうしの関わりを書く場所。
-                人物ごとの欄が空なら立ち絵の向きのままと指示されるため、「向かい合う」をここに
-                書くだけでは、正面を向いたままという指示とぶつかる。 */}
+            <label>作り方</label>
+            <div className="vs-row">
+              <label className="vs-pill vs-method">
+                <input
+                  type="radio"
+                  checked={!placed}
+                  disabled={switchingMethod || compose.running}
+                  onChange={() => void chooseMethod("text")}
+                /> 指示文で合成
+              </label>
+              <label className="vs-pill vs-method">
+                <input
+                  type="radio"
+                  checked={placed}
+                  disabled={switchingMethod || compose.running}
+                  onChange={() => void chooseMethod("placed")}
+                /> 人物を置いて合成
+              </label>
+            </div>
             <div className="vs-muted">
-              その場で起きていることや、人物どうしの関わりを書きます。姿勢・表情・向き・立ち位置は、
-              下の「人物ごとの指定」で人物ごとに書きます。
-              {stillImage.character_ids.length > 1
-                && "状況説明に名前を書くと、その人物だけに効きます。向かい合わせたいときは、それぞれの向きも人物ごとに書きます。"}
+              {placed
+                ? "人物ごとに姿を作り、背景の上で位置と大きさを決めてから、人物のまわりだけをなじませます。置いたとおりの位置と大きさになり、背景はそのまま残ります。人物どうしが触れ合う構図は作れません。"
+                : "人物と背景を指示文から1枚に描き起こすので、背景となじみやすくなります。握手など、人物どうしが触れ合う構図も作れます。位置や大きさは文では決まりにくく、背景も描き直されます。"}
             </div>
           </div>
+
+          {placed ? (
+            <>
+              {stillImageChars.length > 0 && (
+                <details className="vs-collapse" open={needsPose || missingFigure}>
+                  <summary>1. 人物の姿（{stillImageChars.length}人）</summary>
+                  <p className="vs-muted vs-state-lead">
+                    この静止画での、人物ごとのポーズ・表情・向きを決めて姿を作ります。指定は「姿を作る」を
+                    押したときに保存されます。衣装を変えたいときは素材作成の「登場人物」タブで別の立ち絵を作ってください。
+                  </p>
+                  {stillImageChars.map((char) => {
+                    const info = charInfos.find((item) => item.character_id === char.id);
+                    return (
+                      <StillImagePosePanel
+                        key={char.id}
+                        stillImageId={stillImage.id}
+                        character={char}
+                        info={info}
+                        figures={figuresByCharacter[char.id] ?? []}
+                        spec={specDrafts[char.id] ?? info?.spec ?? EMPTY_STILL_IMAGE_CHARACTER_SPEC}
+                        onSpecChange={(spec) =>
+                          setSpecDrafts((drafts) => ({ ...drafts, [char.id]: spec }))
+                        }
+                        onChooseFigure={(figureId) => chooseFigure(char.id, figureId)}
+                        beforeStart={() => saveQueue.current}
+                        onPoseMade={async () => {
+                          await reloadCharacters();
+                          await onChanged();
+                        }}
+                      />
+                    );
+                  })}
+                </details>
+              )}
+
+              <div className="vs-field">
+                <label>2. 背景に置く</label>
+                {background?.has_image && frame ? (
+                  <>
+                    <PlacementEditor
+                      backgroundSrc={api.assetImageSrc("background-assets", background)}
+                      frame={frame}
+                      people={stillImageChars.flatMap((char) => {
+                        // 位置は読み込んだ記録から始める。読み込む前の人物はまだ出さない。
+                        const info = charInfos.find((item) => item.character_id === char.id);
+                        if (!info) return [];
+                        const src = info.pose_url ?? info.figure_url;
+                        return [{
+                          id: char.id,
+                          name: char.name,
+                          src: src ? api.apiUrl(src) : null,
+                          cutout: Boolean(info.pose_url),
+                          layout: layoutDrafts[char.id] ?? info.layout,
+                        }];
+                      })}
+                      onChange={(id, layout) =>
+                        setLayoutDrafts((drafts) => ({ ...drafts, [id]: layout }))
+                      }
+                    />
+                    <div className="vs-row">
+                      <span className="vs-muted">
+                        人物をドラッグして動かし、頭の上のつまみを上下にドラッグして大きさを変えます。
+                        置いた位置は、静止画を合成したときに保存されます。
+                      </span>
+                      <button
+                        className="vs-btn ghost"
+                        disabled={savedLayoutsKey === draftLayoutsKey}
+                        onClick={() =>
+                          setLayoutDrafts(
+                            Object.fromEntries(charInfos.map((info) => [info.character_id, info.layout])),
+                          )
+                        }
+                      >
+                        置き直しを取り消す
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="vs-muted">
+                    {background ? "背景に画像がありません。" : "背景が選ばれていません。"}
+                    「使う素材を変える」で、画像のある背景を選んでください。
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="vs-field">
+              <label>合成の状況説明（任意）</label>
+              <textarea
+                className="vs-textarea"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={
+                  stillImage.character_ids.length > 1
+                    ? "例: 二人で話している"
+                    : "例: 本を読んでいる"
+                }
+              />
+              {/* 姿勢・表情・向きは人物ごとの欄で指定する。ここは出来事や人物どうしの関わりを書く場所。
+                  人物ごとの欄が空なら立ち絵の向きのままと指示されるため、「向かい合う」をここに
+                  書くだけでは、正面を向いたままという指示とぶつかる。 */}
+              <div className="vs-muted">
+                その場で起きていることや、人物どうしの関わりを書きます。姿勢・表情・向き・立ち位置は、
+                下の「人物ごとの指定」で人物ごとに書きます。
+                {stillImage.character_ids.length > 1
+                  && "状況説明に名前を書くと、その人物だけに効きます。向かい合わせたいときは、それぞれの向きも人物ごとに書きます。"}
+              </div>
+            </div>
+          )}
           {/* 速さと出来のどちらを取るかは作品づくりの判断なので、その場で選べるようにする。 */}
           <div className="vs-field vs-quality-field">
-            <label>合成の丁寧さ</label>
+            <label>{placed ? "3. 合成の丁寧さ" : "合成の丁寧さ"}</label>
             <select
               className="vs-input"
               value={quality}
               onChange={(e) => setQuality(e.target.value as "fast" | "careful")}
             >
-              <option value="fast">速さ優先（数秒）</option>
-              <option value="careful">丁寧に合成（数分・指定の反映が強い）</option>
+              {/* 置いて合成で描き直すのは人物のまわりだけ。姿勢や向きは姿で決まっているので、
+                  丁寧にしても指定の反映は変わらず、変わるのは仕上がりの細かさと時間だけ。 */}
+              <option value="fast">{placed ? "速さ優先（10秒ほど）" : "速さ優先（数秒）"}</option>
+              <option value="careful">
+                {placed ? "丁寧に合成（1分ほど）" : "丁寧に合成（数分・指定の反映が強い）"}
+              </option>
             </select>
           </div>
           <button
             className="vs-btn"
-            disabled={compose.running || !stillImage.can_compose}
+            disabled={compose.running || !stillImage.can_compose || Boolean(draftBlockReason)}
             onClick={() =>
               void compose.run(
                 async () => {
                   // 選び直した立ち絵の保存が届いてから合成する。届く前だと前の立ち絵で合成される。
                   await saveQueue.current;
-                  // 人物ごとの指定は、画面に出ている内容を合成と一緒に保存する。
-                  const characterSpecs = Object.fromEntries(
-                    Object.entries(specDrafts).filter(([id]) => stillImage.character_ids.includes(id)),
+                  const inThisImage = <T,>(drafts: Record<string, T>) =>
+                    Object.fromEntries(
+                      Object.entries(drafts).filter(([id]) => stillImage.character_ids.includes(id)),
+                    );
+                  // 置いた位置（置いて合成）か人物ごとの指定（指示文で合成）を、合成と一緒に保存する。
+                  const r = await api.composeStillImage(
+                    stillImage.id,
+                    placed
+                      ? { quality, layouts: inThisImage(layoutDrafts) }
+                      : { prompt, quality, character_specs: inThisImage(specDrafts) },
                   );
-                  const r = await api.composeStillImage(stillImage.id, {
-                    prompt,
-                    quality,
-                    character_specs: characterSpecs,
-                  });
-                  // 保存された指定を読み直し、画面と保存済みの内容をそろえる。
+                  // 保存された内容を読み直し、画面と保存済みの内容をそろえる。
                   void reloadCharacters();
                   return { job_id: r.job_id };
                 },
@@ -2943,15 +3444,17 @@ function StillImageCard({
             {compose.running ? "合成中..." : "静止画を合成"}
           </button>
           {/* 押せない理由は必ずボタンのそばに出す（押して409で気づく形にしない）。 */}
-          {!stillImage.can_compose && (
+          {!stillImage.can_compose ? (
             <div className="vs-warn vs-block-reason">{stillImage.compose_blocked_reason}</div>
+          ) : (
+            draftBlockReason && <div className="vs-warn vs-block-reason">{draftBlockReason}</div>
           )}
           {compose.running && (
             <Progress value={compose.progress} label={compose.message} runner={compose} setError={setError} />
           )}
 
           {/* 人物ごとの指定は、必要なときだけ開く。 */}
-          {stillImageChars.length > 0 && (
+          {!placed && stillImageChars.length > 0 && (
             <details className="vs-collapse" open={missingFigure}>
               <summary>人物ごとの指定（{stillImageChars.length}人）</summary>
               <p className="vs-muted vs-state-lead">
@@ -3001,6 +3504,7 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
   const [charIds, setCharIds] = useState<string[]>([]);
   // 1枚に入れられる人数。作品によらないのでここで一度だけ読む。
   const [maxCharacters, setMaxCharacters] = useState<number | null>(null);
+  const [frame, setFrame] = useState<{ width: number; height: number } | null>(null);
   // 出来上がった静止画の拡大。前後の静止画へ送れるよう、一覧の側で持つ。
   const stillImageLightbox = useLightbox();
 
@@ -3009,6 +3513,7 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
       try {
         const limits = await api.getCompositionLimits();
         setMaxCharacters(limits.max_characters);
+        setFrame({ width: limits.width, height: limits.height });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -3096,6 +3601,7 @@ function StillImagesTab({ projectId, projectName }: { projectId: string; project
             );
           }}
           maxCharacters={maxCharacters}
+          frame={frame}
         />
       ))}
       {stillImageLightbox.node}

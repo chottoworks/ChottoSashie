@@ -20,6 +20,19 @@ class CompositionQuality(StrEnum):
     CAREFUL = "careful"
 
 
+class CompositionMethod(StrEnum):
+    """静止画の作り方。
+
+    既定は指示文で1枚に描き起こす（text）。人物と背景を一緒に描くので、物語の挿絵として
+    なじみやすい。置いて合成する（placed）は、人物ごとに姿を作って背景の上へ置き、
+    人物のまわりだけをなじませる。位置・大きさ・向きが置いたとおりになり、背景も
+    描き直されないので、それらを決めたいときに選ぶ。
+    """
+
+    PLACED = "placed"
+    TEXT = "text"
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
@@ -343,12 +356,14 @@ class StillImageCreate(BaseModel):
     name: str = Field(default="", max_length=200)
     background_asset_id: str | None = None
     character_ids: list[str] = Field(default_factory=list, max_length=8)
+    composition_method: CompositionMethod = CompositionMethod.TEXT
 
 
 class StillImageUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     background_asset_id: str | None = None
     character_ids: list[str] | None = Field(default=None, max_length=8)
+    composition_method: CompositionMethod | None = None
 
 
 class StillImageRead(BaseModel):
@@ -360,8 +375,11 @@ class StillImageRead(BaseModel):
     character_ids: list[str]
     composition_job_id: str | None
     has_image: bool
+    composition_method: CompositionMethod = CompositionMethod.TEXT
     # 画像URLに付ける版。合成した画像を書くたびに変わる。
     image_version: str = ""
+    # 今の画像を合成するときに ComfyUI へ渡した指示文。空なら記録が無い。
+    source_prompt: str = ""
     # 実行できない操作は押せないようにするための判定と、その理由。
     can_compose: bool = True
     compose_blocked_reason: str = ""
@@ -375,6 +393,9 @@ class CompositionLimits(BaseModel):
     max_reference_images: int
     # 1枚に入れられる人物の数。背景1枚ぶんを差し引いた残りが上限になる。
     max_characters: int
+    # 出来上がる静止画の大きさ。人物を置く画面は、この縦横比で背景を見せる。
+    width: int
+    height: int
 
 
 # ワークフローに焼き込んである既定のQwen-Image-Editモデル名。呼び出し側が
@@ -387,14 +408,18 @@ DEFAULT_COMPOSITION_LIGHTNING_LORA = (
 )
 
 
+COMPOSITION_WIDTH = 1280
+COMPOSITION_HEIGHT = 720
+
+
 class CompositionRequest(BaseModel):
     # 未指定ならセットアップ設定の接続先を使う。
     base_url: str | None = Field(default=None, max_length=500)
     prompt: str = Field(default="", max_length=4000)
     negative_prompt: str = Field(default="", max_length=2000)
     seed: int | None = Field(default=None, ge=0)
-    width: int = Field(default=1280, ge=256, le=2048)
-    height: int = Field(default=720, ge=256, le=2048)
+    width: int = Field(default=COMPOSITION_WIDTH, ge=256, le=2048)
+    height: int = Field(default=COMPOSITION_HEIGHT, ge=256, le=2048)
     diffusion_model: str = Field(default=DEFAULT_COMPOSITION_DIFFUSION_MODEL, max_length=300)
     text_encoder: str = Field(default=DEFAULT_COMPOSITION_TEXT_ENCODER, max_length=300)
     vae: str = Field(default=DEFAULT_COMPOSITION_VAE, max_length=300)
@@ -404,8 +429,11 @@ class CompositionRequest(BaseModel):
     quality: CompositionQuality = CompositionQuality.FAST
     # 画面に出ている人物ごとの指定（人物のID → 指定）。合成するときに保存し、その内容で
     # 合成する。画面の指定と合成に使う指定が食い違わないよう、保存は合成と一緒にしか
-    # 行わない。含まれない人物は保存済みの指定のまま。
+    # 行わない。含まれない人物は保存済みの指定のまま。指示文で描き起こすときに使う。
     character_specs: dict[str, StillImageCharacterSpec] = Field(default_factory=dict)
+    # 画面で置いた人物の位置（人物のID → 位置）。置いて合成するときに保存し、その位置で
+    # 合成する。含まれない人物は保存済みの位置（無ければ既定の並び）のまま。
+    layouts: dict[str, StillImageCharacterLayout] = Field(default_factory=dict)
 
 
 class VideoEnabledUpdate(BaseModel):
@@ -1004,6 +1032,23 @@ class StillImageCharacterSpec(BaseModel):
     def strip_spec_fields(cls, value: str | None) -> str:
         return value.strip() if isinstance(value, str) else ""
 
+    def posing(self) -> StillImageCharacterSpec:
+        """姿を作るのに使う分だけ。配置は姿ではなく、置く位置で決める。"""
+        return self.model_copy(update={"placement": ""})
+
+
+class StillImageCharacterLayout(BaseModel):
+    """置いて合成するときの、背景の上の人物の位置。
+
+    どれも出来上がる静止画に対する割合で持つ。`x` は人物の中心、`y` は足もとの高さ、
+    `height` は人物の身長（頭から足もとまで）。足もとで持つのは、地面に立たせる位置を
+    決めるのが足もとだから。
+    """
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    height: float = Field(ge=0.05, le=1.5)
+
 
 class StillImageCharacterUpdate(BaseModel):
     """指定と、使う立ち絵の選択。`figure_id` が空なら既定の立ち絵を使う。
@@ -1029,3 +1074,27 @@ class StillImageCharacterRead(BaseModel):
     figure_url: str | None = None
     # 立ち絵が1枚も無い人物。合成はできない。
     has_figure: bool = False
+    # 置いて合成するときの姿。まだ作っていなければ None。
+    pose_url: str | None = None
+    # 姿を作ったときの指定。画面はこれと書きかけの指定を比べて、作り直しが要るかを出す。
+    pose_spec: StillImageCharacterSpec | None = None
+    # 姿を作るときに ComfyUI へ渡した編集の指示文。指定が空で編集しなかったときは空。
+    # 姿が無いか、記録が無ければ None。
+    pose_prompt: str | None = None
+    # 姿を作ったあとに立ち絵を選び直したか、指定が変わった。合成の前に作り直しが要る。
+    pose_outdated: bool = False
+    # 背景の上の位置。まだ置いていなければ既定の並び。
+    layout: StillImageCharacterLayout
+
+
+class StillImagePoseRequest(BaseModel):
+    """この静止画用の人物の姿を作る。指定はこのときに保存する（合成の指定と同じ扱い）。"""
+
+    base_url: str | None = Field(default=None, max_length=500)
+    spec: StillImageCharacterSpec = Field(default_factory=StillImageCharacterSpec)
+    seed: int | None = Field(default=None, ge=0)
+
+
+class StillImagePoseResult(BaseModel):
+    job_id: str
+    character: StillImageCharacterRead

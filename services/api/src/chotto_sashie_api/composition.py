@@ -97,19 +97,26 @@ class StillImageReference:
 
     @property
     def instruction(self) -> str:
-        """この人物への指定を、日本語の文にまとめる。空なら立ち絵のまま。
+        """この人物への指定を、日本語の文にまとめる。空なら立ち絵のまま。"""
+        return person_instruction(
+            pose=self.pose, direction=self.direction, expression=self.expression, notes=self.notes
+        )
 
-        ラベルと読点で並べた形（「ポーズ: 走り、右向き」）は実機で反映されず、句点で
-        区切った文にすると同じ指定語でも姿勢と向きが出た。合成でこの書き方がいちばん
-        効くかは、これから同じ種・同じ立ち絵で比べて決める。
-        """
-        parts = [
-            f"ポーズは{self.pose}。" if self.pose else "",
-            f"体の向きは{self.direction}。" if self.direction else "",
-            f"表情は{self.expression}。" if self.expression else "",
-            f"{self.notes}。" if self.notes else "",
-        ]
-        return "".join(part for part in parts if part)
+
+def person_instruction(*, pose: str, direction: str, expression: str, notes: str) -> str:
+    """人物ごとの指定を、日本語の文にまとめる。空なら空文字。
+
+    ラベルと読点で並べた形（「ポーズ: 走り、右向き」）は実機で反映されず、句点で
+    区切った文にすると同じ指定語でも姿勢と向きが出た。指示文で描き起こす合成と、
+    置いて合成するときの姿づくりが、同じ書き方を使う。
+    """
+    parts = [
+        f"ポーズは{pose}。" if pose else "",
+        f"体の向きは{direction}。" if direction else "",
+        f"表情は{expression}。" if expression else "",
+        f"{notes}。" if notes else "",
+    ]
+    return "".join(part for part in parts if part)
 
 
 class CompositionError(ValueError):
@@ -135,6 +142,14 @@ def over_limit_message(character_count: int) -> str:
         f"1枚に入れられる人物は{MAX_CHARACTERS}人までです（現在{character_count}人）。"
         "3人以上を出したいときは、人物を入れた1枚を背景として登録し直してください"
     )
+
+
+def require_background(still_image: Any) -> None:
+    """合成には背景が要る。どちらの作り方でも、人物を置く先・描き込む先になる。"""
+    if still_image.background_asset_id is None:
+        raise CompositionError(
+            "背景が選ばれていません。「使う素材を変える」で背景を選んでください"
+        )
 
 
 def resolve_still_image_figure(database: Any, still_image_id: str, character_id: str) -> Any:
@@ -185,6 +200,7 @@ def resolve_still_image_sources(database: Any, still_image: Any) -> list[StillIm
     character_repo = CharacterRepository(database)
     chosen_repo = StillImageCharacterRepository(database)
 
+    require_background(still_image)
     if len(still_image.character_ids) > MAX_CHARACTERS:
         raise CompositionError(over_limit_message(len(still_image.character_ids)))
 

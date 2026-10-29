@@ -27,6 +27,7 @@ from .storage import (
     shot_segment_dir,
     shot_video_dir,
     still_image_dir,
+    still_image_pose_dir,
 )
 
 # 記録が持っている、保存先の中のファイルの場所。start_frame_image_path は他の記録の
@@ -38,6 +39,7 @@ _PATH_COLUMNS: tuple[tuple[str, str], ...] = (
     ("character_figure_edits", "image_path"),
     ("characters", "portrait_image_path"),
     ("still_images", "image_path"),
+    ("still_image_characters", "pose_image_path"),
     ("shots", "output_video_path"),
     ("shots", "last_frame_image_path"),
     ("shots", "custom_start_frame_path"),
@@ -57,6 +59,7 @@ def managed_folders(data_dir: Path) -> list[Path]:
         portraits_dir(data_dir),
         local_image_path(data_dir, CANDIDATE_IMAGES, "_").parent,
         still_image_dir(data_dir),
+        still_image_pose_dir(data_dir),
         shot_video_dir(data_dir),
         shot_last_frame_dir(data_dir),
         shot_frame_dir(data_dir),

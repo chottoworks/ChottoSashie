@@ -354,7 +354,7 @@ def test_saving_a_still_image_to_a_chosen_place(client: TestClient, tmp_path: Pa
     composed = tmp_path / "keyframes" / f"{still_image_id}.png"
     composed.parent.mkdir()
     composed.write_bytes(b"PNG-DATA")
-    StillImageRepository(main.database).set_image(still_image_id, composed)
+    StillImageRepository(main.database).set_image(still_image_id, composed, source_prompt="")
     chosen = tmp_path / "手元 の 挿絵" / "夕暮れ.png"
     chosen.parent.mkdir()
 

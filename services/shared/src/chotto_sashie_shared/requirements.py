@@ -75,6 +75,7 @@ def _available_files(object_info: dict[str, Any], loader: str, input_name: str) 
 
     ローダーノード自体が無ければ None（=確認不能）を返す。ComfyUIのobject_infoでは
     コンボ入力は ``[[選択肢...], {設定}]`` の形で、先頭要素が候補一覧になっている。
+    新しい形式で書かれたノード（背景除去など）は ``["COMBO", {"options": [...]}]`` の形で返す。
     """
     node = object_info.get(loader)
     if not isinstance(node, dict):
@@ -88,6 +89,14 @@ def _available_files(object_info: dict[str, Any], loader: str, input_name: str) 
             spec = section[input_name]
             if isinstance(spec, list) and spec and isinstance(spec[0], list):
                 return [str(item) for item in spec[0]]
+            if (
+                isinstance(spec, list)
+                and len(spec) > 1
+                and spec[0] == "COMBO"
+                and isinstance(spec[1], dict)
+                and isinstance(spec[1].get("options"), list)
+            ):
+                return [str(item) for item in spec[1]["options"]]
             return []
     return []
 

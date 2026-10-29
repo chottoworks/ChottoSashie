@@ -36,6 +36,7 @@ APP_ENTRIES: tuple[str, ...] = (
     "assets",
     "outputs",
     "keyframes",
+    "still-image-poses",
     "videos",
     "shot-last-frames",
     "shot-frames",

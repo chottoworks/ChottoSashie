@@ -46,7 +46,7 @@ def _still_image_with_file(client: TestClient, data_dir: Path) -> tuple[str, str
         f"/api/v1/projects/{project_id}/still-images", json={"name": "放課後"}
     ).json()["id"]
     image = _write(still_image_dir(data_dir) / f"{still_image_id}.png")
-    StillImageRepository(main.database).set_image(still_image_id, image)
+    StillImageRepository(main.database).set_image(still_image_id, image, source_prompt="")
     return project_id, still_image_id, image
 
 
@@ -72,7 +72,9 @@ def test_records_are_matched_by_file_name(client: TestClient, data_dir: Path, tm
     """記録の中の場所が古い保存先を指していても、同じ名前のファイルは消さない。"""
     _project_id, still_image_id, image = _still_image_with_file(client, data_dir)
     StillImageRepository(main.database).set_image(
-        still_image_id, tmp_path / "old-location" / "keyframes" / image.name
+        still_image_id,
+        tmp_path / "old-location" / "keyframes" / image.name,
+        source_prompt="",
     )
 
     assert remove_unreferenced_files(main.database, data_dir) == 0
@@ -140,7 +142,12 @@ def test_a_result_whose_record_was_deleted_is_not_kept(
 
     asyncio.run(
         main.monitor_still_image_composition(
-            job.id, still_image_id, "prompt-1", "http://127.0.0.1:8188", poll_seconds=0
+            job.id,
+            still_image_id,
+            "prompt-1",
+            "http://127.0.0.1:8188",
+            poll_seconds=0,
+            source_prompt="",
         )
     )
 

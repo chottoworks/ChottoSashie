@@ -119,6 +119,7 @@ from chotto_sashie_shared.runtime import (
     comfy_io_directories,
 )
 from chotto_sashie_shared.jobs import (
+    ACTIVE_JOB_STATES,
     INTERRUPTED_MESSAGE,
     InvalidTransitionError,
     JobCreate,
@@ -178,12 +179,29 @@ from .comfyui_provision import (
 from .composition import (
     MAX_CHARACTERS,
     MAX_REFERENCE_IMAGES,
+    KIND_BACKGROUND,
+    KIND_CHARACTER,
     CompositionError,
     StillImageReference,
     build_composition_prompt,
     build_composition_workflow,
     resolve_still_image_figure,
     resolve_still_image_sources,
+)
+from .placed_composition import (
+    POSE_HEIGHT,
+    POSE_WIDTH,
+    blend_mask,
+    build_blend_prompt,
+    build_blend_workflow,
+    build_pose_prompt,
+    build_pose_workflow,
+    compose_draft,
+    cut_out,
+    default_layout,
+    finish_blend,
+    pose_outdated,
+    resolve_placed_sources,
 )
 from .database import Database
 from .derivation import (
@@ -276,7 +294,10 @@ from .schemas import (
     DEFAULT_COMPOSITION_LIGHTNING_LORA,
     DEFAULT_COMPOSITION_TEXT_ENCODER,
     DEFAULT_COMPOSITION_VAE,
+    COMPOSITION_HEIGHT,
+    COMPOSITION_WIDTH,
     CompositionLimits,
+    CompositionMethod,
     CharacterCreate,
     CharacterDeletionPreview,
     CharacterFigureEditRead,
@@ -294,6 +315,8 @@ from .schemas import (
     StillImageCharacterRead,
     StillImageCharacterSpec,
     StillImageCharacterUpdate,
+    StillImagePoseRequest,
+    StillImagePoseResult,
     ComfyUIStatus,
     CompositionQuality,
     CompositionRequest,
@@ -355,6 +378,7 @@ from .storage import (
     shot_segment_dir,
     shot_video_dir,
     still_image_dir,
+    still_image_pose_dir,
 )
 
 database = Database(settings.database_path)
@@ -365,6 +389,7 @@ T = TypeVar("T")
 # 載っていないと、再起動したときに順番待ちのまま取り残される。
 VIDEO_GPU_JOB_KINDS: tuple[str, ...] = (
     "composition.still_image",
+    "composition.still_image_pose",
     "composition.shot_frame",
     "generation.asset",
     "generation.prompt.shot",
@@ -374,6 +399,7 @@ VIDEO_GPU_JOB_KINDS: tuple[str, ...] = (
 )
 _VIDEO_JOB_LABELS: dict[str, str] = {
     "composition.still_image": "静止画の合成",
+    "composition.still_image_pose": "人物の姿づくり",
     "composition.shot_frame": "構図の作り直し",
     "generation.asset": "背景・小物の生成",
     "generation.prompt.shot": "生成に使う文の用意",
@@ -411,6 +437,10 @@ def managed_runtime_options() -> ManagedRuntimeOptions:
 # インストールされているか、配布版かで違うため、決め方は shared_env に任せる。
 _RESOURCES_ROOT = app_resources_root()
 COMPOSITION_WORKFLOW_PATH = _RESOURCES_ROOT / "workflows" / "composition" / "qwen_scene_composition.json"
+# 置いて合成するときに、人物の姿を切り抜く背景除去。
+BACKGROUND_REMOVAL_WORKFLOW_PATH = (
+    _RESOURCES_ROOT / "workflows" / "composition" / "background_removal.json"
+)
 # 背景・小物のtxt2imgは Z-Image Turbo のテンプレートを使う。
 ASSET_GENERATION_WORKFLOW_PATH = _RESOURCES_ROOT / "workflows" / "z_image" / "zimage_basic_core.json"
 # カットのI2Vは2種類から選ぶ。Wan 2.2（無音webp）とMiniMax H3（音声付きmp4）。
@@ -1174,11 +1204,20 @@ async def _upload_local_image(
     送った名前は `uploaded` へ足す。生成を見届けたら `ComfyScratch.discard_inputs` で
     片付ける（送った画像はアプリ側に実体があるので、ComfyUI側に残す理由が無い）。
     """
-    sent = await client.upload_image(
+    return await _upload_image_bytes(
+        client,
         image_path.read_bytes(),
-        filename=f"{name}{image_path.suffix}",
-        content_type=guess_content_type(image_path),
+        f"{name}{image_path.suffix}",
+        guess_content_type(image_path),
+        uploaded,
     )
+
+
+async def _upload_image_bytes(
+    client: ComfyClient, data: bytes, filename: str, content_type: str, uploaded: list[str]
+) -> str:
+    """作った画像（置いて合成するときの下書きなど）をComfyUIへ送り、LoadImageへ渡す名前を返す。"""
+    sent = await client.upload_image(data, filename=filename, content_type=content_type)
     comfy_name = f"{sent['subfolder']}/{sent['name']}" if sent["subfolder"] else sent["name"]
     uploaded.append(comfy_name)
     return comfy_name
@@ -2361,7 +2400,10 @@ def get_composition_limits() -> CompositionLimits:
     都合で増やせない。画面が同じ数字を持たずに済むよう、ここから配る。
     """
     return CompositionLimits(
-        max_reference_images=MAX_REFERENCE_IMAGES, max_characters=MAX_CHARACTERS
+        max_reference_images=MAX_REFERENCE_IMAGES,
+        max_characters=MAX_CHARACTERS,
+        width=COMPOSITION_WIDTH,
+        height=COMPOSITION_HEIGHT,
     )
 
 
@@ -2433,19 +2475,30 @@ async def monitor_still_image_composition(
     *,
     poll_seconds: float = 0.5,
     max_polls: int = 3600,
+    source_prompt: str,
+    finish: Callable[[bytes], bytes] | None = None,
 ) -> None:
-    """合成のComfyUI履歴を監視し、完成した静止画をローカルへ保存する。"""
+    """合成のComfyUI履歴を監視し、完成した静止画をローカルへ保存する。
+
+    `source_prompt` は ComfyUI へ渡した指示文で、画像と一緒に記録する（画面で参照する）。
+    `finish` を渡すと、出来上がった画像をそれで仕上げてから保存する（置いて合成で、
+    描き直した範囲の外を下書きの画素へ戻す）。
+    """
     still_images = StillImageRepository(database)
     client = ComfyClient(base_url)
 
     async def save(files: list[dict[str, str]]) -> dict[str, object]:
         content, _media_type = await client.view_image(files[0])
+        if finish is not None:
+            content = await asyncio.to_thread(finish, content)
         _STILL_IMAGE_ROOT.mkdir(parents=True, exist_ok=True)
         destination = _STILL_IMAGE_ROOT / f"{still_image_id}.png"
         destination.write_bytes(content)
         _record_or_discard(
             destination,
-            lambda: still_images.set_image(still_image_id, destination),
+            lambda: still_images.set_image(
+                still_image_id, destination, source_prompt=source_prompt
+            ),
             (StillImageNotFoundError,),
         )
         return {"still_image_id": still_image_id}
@@ -2509,6 +2562,8 @@ async def compose_still_image(
         still_image = still_images.get(still_image_id)
     except StillImageNotFoundError as error:
         raise HTTPException(status_code=404, detail="静止画が見つかりません") from error
+    if still_image.composition_method == CompositionMethod.PLACED:
+        return await _compose_placed_still_image(still_image, request)
     if not set(request.character_specs) <= set(still_image.character_ids):
         raise HTTPException(status_code=404, detail="指定した人物はこの静止画に含まれていません")
 
@@ -2583,7 +2638,9 @@ async def compose_still_image(
                     result={"still_image_id": still_image_id},
                 ),
             )
-            await monitor_still_image_composition(job_id, still_image_id, prompt_id, base_url)
+            await monitor_still_image_composition(
+                job_id, still_image_id, prompt_id, base_url, source_prompt=prompt
+            )
         except (ComfyConnectionError, CompositionError, OSError, ValueError) as error:
             _fail_job(job_id, str(error), "COMPOSITION_SUBMIT_FAILED")
         finally:
@@ -2595,6 +2652,102 @@ async def compose_still_image(
         lambda job_id: partial(run, job_id),
     )
     still_image = still_images.set_composition_job(still_image_id, job.id)
+    return CompositionResult(still_image=still_image, job_id=job.id)
+
+
+async def _compose_placed_still_image(
+    still_image: StillImageRead, request: CompositionRequest
+) -> CompositionResult:
+    """人物の姿を背景の上へ置いた下書きを作り、その1枚だけを渡してなじませる。
+
+    位置は画面で置いた内容を、合成を受け付けられると分かってから保存する（指定と同じく、
+    合成しなければ保存しない）。保存した位置から下書きを作るので、画面と合成が食い違わない。
+    """
+    still_image_id = still_image.id
+    if not set(request.layouts) <= set(still_image.character_ids):
+        raise HTTPException(status_code=404, detail="指定した人物はこの静止画に含まれていません")
+    try:
+        resolve_placed_sources(database, still_image)
+    except (CompositionError, CharacterNotFoundError, AssetNotFoundError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    base_url = _resolve_base_url(request.base_url)
+
+    chosen = StillImageCharacterRepository(database)
+    for character_id, layout in request.layouts.items():
+        chosen.set_layout(still_image_id, character_id, layout)
+    sources = resolve_placed_sources(database, still_image)
+
+    seed = request.seed if request.seed is not None else randbelow(9_007_199_254_740_967)
+    payload = {**request.model_dump(mode="json"), "still_image_id": still_image_id, "seed": seed}
+
+    async def run(job_id: str) -> None:
+        """順番が来てから下書きを作り、ComfyUIへ送って終わるまで見届ける。"""
+        client = ComfyClient(base_url)
+        uploaded: list[str] = []
+        try:
+            # 下書きは順番が来てから作る。待っている間に姿を作り直していれば、新しい姿で置く。
+            draft = await asyncio.to_thread(
+                compose_draft, sources, request.width, request.height
+            )
+            mask = await asyncio.to_thread(blend_mask, sources, request.width, request.height)
+            comfy_name = await _upload_image_bytes(
+                client, draft, f"{still_image_id}-draft.png", "image/png", uploaded
+            )
+            mask_name = await _upload_image_bytes(
+                client, mask, f"{still_image_id}-mask.png", "image/png", uploaded
+            )
+            blend_prompt = build_blend_prompt(
+                len(sources.figures), _project_illustration_style(still_image.project_id)
+            )
+            composition_workflow = build_composition_workflow(
+                load_workflow(COMPOSITION_WORKFLOW_PATH),
+                references=[
+                    StillImageReference(kind=KIND_BACKGROUND, name="", comfy_image=comfy_name)
+                ],
+                prompt=blend_prompt,
+                negative_prompt=request.negative_prompt,
+                seed=seed,
+                width=request.width,
+                height=request.height,
+                diffusion_model=request.diffusion_model,
+                text_encoder=request.text_encoder,
+                vae=request.vae,
+                lightning_lora=request.lightning_lora,
+                filename_prefix=f"{OUTPUT_ROOT_NAME}/still_images/{still_image_id}",
+                careful=request.quality is CompositionQuality.CAREFUL,
+            )
+            # 描き直すのは人物のまわりだけ。背景は下書き（＝元の背景）の画素のまま残す。
+            workflow = build_blend_workflow(composition_workflow, mask_name)
+            prompt_id = await client.submit(workflow, str(uuid4()))
+            jobs.transition(
+                job_id,
+                JobTransition(
+                    state="preparing",
+                    progress=0.1,
+                    message="静止画の合成をキューへ登録しました",
+                    external_id=prompt_id,
+                    result={"still_image_id": still_image_id},
+                ),
+            )
+            await monitor_still_image_composition(
+                job_id,
+                still_image_id,
+                prompt_id,
+                base_url,
+                source_prompt=blend_prompt,
+                finish=lambda generated: finish_blend(generated, draft, mask),
+            )
+        except (ComfyConnectionError, CompositionError, OSError, ValueError) as error:
+            _fail_job(job_id, str(error), "COMPOSITION_SUBMIT_FAILED")
+        finally:
+            _comfy_scratch(base_url).discard_inputs(uploaded)
+
+    job = await gpu_queue.submit(
+        jobs,
+        JobCreate(kind="composition.still_image", payload=payload),
+        lambda job_id: partial(run, job_id),
+    )
+    still_image = StillImageRepository(database).set_composition_job(still_image_id, job.id)
     return CompositionResult(still_image=still_image, job_id=job.id)
 
 
@@ -2613,22 +2766,31 @@ def get_still_image_image(still_image_id: str) -> Response:
 
 
 def _still_image_character_read(
-    still_image_id: str, character_id: str
+    still_image: StillImageRead, character_id: str
 ) -> StillImageCharacterRead:
     """画面へ返す1人ぶん。実際に合成で使う立ち絵と同じ解決を通す。
 
     ここで別の決め方をすると、画面に出るサムネイルと合成に渡る1枚が食い違う。
     """
+    still_image_id = still_image.id
     try:
         character_name = CharacterRepository(database).get(character_id).name
     except CharacterNotFoundError:
         character_name = ""
     record = StillImageCharacterRepository(database).get(still_image_id, character_id)
     figure = resolve_still_image_figure(database, still_image_id, character_id)
+    spec = record.spec if record is not None else StillImageCharacterSpec()
+    has_pose = record is not None and bool(record.pose_image_path)
+    count = len(still_image.character_ids)
+    index = (
+        still_image.character_ids.index(character_id)
+        if character_id in still_image.character_ids
+        else 0
+    )
     return StillImageCharacterRead(
         character_id=character_id,
         character_name=character_name,
-        spec=record.spec if record is not None else StillImageCharacterSpec(),
+        spec=spec,
         figure_id=figure.id if figure is not None else None,
         # 自分で選んだのか、既定のまま使っているのか。
         figure_is_default=not (record is not None and record.figure_id),
@@ -2640,6 +2802,22 @@ def _still_image_character_read(
             else None
         ),
         has_figure=figure is not None,
+        pose_url=(
+            f"/api/v1/still-images/{still_image_id}/characters/{character_id}/pose-image"
+            f"?v={record.pose_revision}"
+            if has_pose
+            else None
+        ),
+        pose_spec=record.pose_spec if has_pose else None,
+        pose_prompt=record.pose_prompt if has_pose else None,
+        pose_outdated=has_pose
+        and pose_outdated(
+            pose_figure_id=record.pose_figure_id,
+            pose_spec=record.pose_spec,
+            figure_id=figure.id if figure is not None else None,
+            spec=spec,
+        ),
+        layout=(record.layout if record is not None else None) or default_layout(index, count),
     )
 
 
@@ -2653,7 +2831,7 @@ def list_still_image_characters(still_image_id: str) -> list[StillImageCharacter
     except StillImageNotFoundError as error:
         raise HTTPException(status_code=404, detail="静止画が見つかりません") from error
     return [
-        _still_image_character_read(still_image.id, character_id)
+        _still_image_character_read(still_image, character_id)
         for character_id in still_image.character_ids
     ]
 
@@ -2693,7 +2871,187 @@ def update_still_image_character(
         record = chosen.get(still_image_id, character_id)
         spec = record.spec if record is not None else StillImageCharacterSpec()
     chosen.upsert(still_image_id, character_id, spec, figure_id)
-    return _still_image_character_read(still_image_id, character_id)
+    return _still_image_character_read(still_image, character_id)
+
+
+_STILL_IMAGE_POSE_ROOT = still_image_pose_dir(settings.data_dir)
+
+
+@app.post(
+    "/api/v1/still-images/{still_image_id}/characters/{character_id}/pose",
+    response_model=StillImagePoseResult,
+)
+async def make_still_image_pose(
+    still_image_id: str, character_id: str, request: StillImagePoseRequest
+) -> StillImagePoseResult:
+    """この静止画用の人物の姿を作る（置いて合成するときの1人ぶん）。
+
+    指定があれば、立ち絵1枚の編集でポーズ・向き・表情を付けてから背景を抜く。空なら
+    立ち絵をそのまま抜く。指定はここで保存する（姿と、姿を作った指定が食い違わないよう、
+    作るときにしか保存しない）。配置は姿ではなく位置で決めるので、保存済みのまま触れない。
+
+    丁寧な設定（高速化LoRA無し）で作る。立ち絵の変更と同じく、4ステップでは指定の反映も
+    全身・素背景も崩れやすく、崩れた姿は置いても使えない。
+    """
+    try:
+        still_image = StillImageRepository(database).get(still_image_id)
+    except StillImageNotFoundError as error:
+        raise HTTPException(status_code=404, detail="静止画が見つかりません") from error
+    if character_id not in still_image.character_ids:
+        raise HTTPException(status_code=404, detail="指定した人物はこの静止画に含まれていません")
+    figure = resolve_still_image_figure(database, still_image_id, character_id)
+    if figure is None:
+        raise HTTPException(
+            status_code=409,
+            detail="この人物の立ち絵がありません。「登場人物」の画面で立ち絵を作ってください",
+        )
+    chosen = StillImageCharacterRepository(database)
+    record = chosen.get(still_image_id, character_id)
+    if record is not None and record.pose_job_id:
+        try:
+            working = jobs.get(record.pose_job_id).state in ACTIVE_JOB_STATES
+        except JobNotFoundError:
+            working = False
+        if working:
+            raise HTTPException(status_code=409, detail="この人物の姿はいま作っています")
+    base_url = _resolve_base_url(request.base_url)
+
+    current = record.spec if record is not None else StillImageCharacterSpec()
+    spec = request.spec.posing().model_copy(update={"placement": current.placement})
+    chosen.upsert(still_image_id, character_id, spec, record.figure_id if record else None)
+    prompt = build_pose_prompt(spec, _project_illustration_style(still_image.project_id))
+    seed = request.seed if request.seed is not None else randbelow(9_007_199_254_740_967)
+    payload = {
+        **request.model_dump(mode="json"),
+        "still_image_id": still_image_id,
+        "character_id": character_id,
+        "figure_id": figure.id,
+        "seed": seed,
+    }
+    destination = _STILL_IMAGE_POSE_ROOT / f"{still_image_id}-{character_id}.png"
+    figure_path = Path(figure.image_path)
+    scratch = _comfy_scratch(base_url)
+
+    async def run(job_id: str) -> None:
+        client = ComfyClient(base_url)
+        uploaded: list[str] = []
+        image_prefix = f"{job_id}-image"
+        mask_prefix = f"{job_id}-mask"
+
+        async def save(files: list[dict[str, str]]) -> dict[str, object]:
+            mask = next((f for f in files if f["filename"].startswith(mask_prefix)), None)
+            edited = next((f for f in files if f["filename"].startswith(image_prefix)), None)
+            if mask is None or (prompt and edited is None):
+                raise CompositionError("姿を作れませんでした。もう一度「姿を作る」を押してください")
+            mask_bytes, _ = await client.view_image(mask)
+            if edited is not None:
+                image_bytes, _ = await client.view_image(edited)
+            else:
+                image_bytes = figure_path.read_bytes()
+            pose = await asyncio.to_thread(cut_out, image_bytes, mask_bytes)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_name(f".{destination.name}.{job_id}.tmp")
+            temporary.write_bytes(pose)
+            os.replace(temporary, destination)
+
+            def record_pose() -> None:
+                if not chosen.set_pose(
+                    still_image_id,
+                    character_id,
+                    image_path=destination,
+                    figure_id=figure.id,
+                    spec=spec,
+                    prompt=prompt,
+                ):
+                    raise StillImageNotFoundError(still_image_id)
+
+            _record_or_discard(destination, record_pose, (StillImageNotFoundError,))
+            return {"still_image_id": still_image_id, "character_id": character_id}
+
+        try:
+            # 順番待ちの間に中止されたものは、ComfyUIへ送らずに終える。
+            if jobs.is_cancelled(job_id):
+                return
+            comfy_figure = await _upload_local_image(
+                client, figure_path, f"{job_id}-figure", uploaded
+            )
+            edit_workflow = None
+            if prompt:
+                edit_workflow = build_composition_workflow(
+                    load_workflow(COMPOSITION_WORKFLOW_PATH),
+                    references=[
+                        StillImageReference(kind=KIND_CHARACTER, name="", comfy_image=comfy_figure)
+                    ],
+                    prompt=prompt,
+                    negative_prompt="",
+                    seed=seed,
+                    width=POSE_WIDTH,
+                    height=POSE_HEIGHT,
+                    diffusion_model=DEFAULT_COMPOSITION_DIFFUSION_MODEL,
+                    text_encoder=DEFAULT_COMPOSITION_TEXT_ENCODER,
+                    vae=DEFAULT_COMPOSITION_VAE,
+                    lightning_lora=DEFAULT_COMPOSITION_LIGHTNING_LORA,
+                    filename_prefix=f"{OUTPUT_ROOT_NAME}/still_images/poses/{image_prefix}",
+                    careful=True,
+                )
+            workflow = build_pose_workflow(
+                load_workflow(BACKGROUND_REMOVAL_WORKFLOW_PATH),
+                edit_workflow=edit_workflow,
+                figure_image=comfy_figure,
+                removal_prefix=f"{OUTPUT_ROOT_NAME}/still_images/poses/{mask_prefix}",
+            )
+            prompt_id = await client.submit(workflow, str(uuid4()))
+            jobs.transition(
+                job_id,
+                JobTransition(
+                    state="preparing",
+                    progress=0.05,
+                    message="人物の姿づくりをキューへ登録しました",
+                    external_id=prompt_id,
+                    result={"still_image_id": still_image_id, "character_id": character_id},
+                ),
+            )
+            await monitor_comfy_prompt(
+                client=client,
+                jobs=jobs,
+                job_id=job_id,
+                prompt_id=prompt_id,
+                on_success=save,
+                messages=MonitorMessages(
+                    running="人物の姿を作っています" if prompt else "人物を切り抜いています",
+                    saving="人物の姿を保存しています",
+                    completed="人物の姿ができました",
+                    failed="ComfyUIで人物の姿を作れませんでした",
+                    failed_code="POSE_FAILED",
+                    timeout="人物の姿づくりがタイムアウトしました",
+                    timeout_code="POSE_TIMEOUT",
+                    monitor_failed_code="POSE_MONITOR_FAILED",
+                ),
+                settings=MonitorSettings(extra_errors=(StillImageNotFoundError, CompositionError)),
+                scratch=scratch,
+            )
+        except (ComfyConnectionError, CompositionError, OSError, ValueError) as error:
+            _fail_job(job_id, str(error), "POSE_SUBMIT_FAILED")
+        finally:
+            scratch.discard_inputs(uploaded)
+
+    job = await gpu_queue.submit(
+        jobs,
+        JobCreate(kind="composition.still_image_pose", payload=payload),
+        lambda job_id: partial(run, job_id),
+    )
+    chosen.set_pose_job(still_image_id, character_id, job.id)
+    return StillImagePoseResult(
+        job_id=job.id, character=_still_image_character_read(still_image, character_id)
+    )
+
+
+@app.get("/api/v1/still-images/{still_image_id}/characters/{character_id}/pose-image")
+def get_still_image_pose_image(still_image_id: str, character_id: str) -> Response:
+    record = StillImageCharacterRepository(database).get(still_image_id, character_id)
+    if record is None or not record.pose_image_path:
+        raise HTTPException(status_code=404, detail="人物の姿はまだありません")
+    return _serve_image_response(_STILL_IMAGE_POSE_ROOT, Path(record.pose_image_path))
 
 
 # --- カット（ショット）と I2V 動画生成 ---

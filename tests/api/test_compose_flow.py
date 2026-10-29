@@ -77,6 +77,20 @@ def _add_figure(client: TestClient, character_id: str, label: str = "") -> dict:
     return figure
 
 
+def _text_still_image(
+    client: TestClient, project_id: str, name: str, character_ids: list[str]
+) -> str:
+    """指示文で描き起こす静止画。合成には背景が要るので、背景も付ける。"""
+    return client.post(
+        f"/api/v1/projects/{project_id}/still-images",
+        json={
+            "name": name,
+            "background_asset_id": _background_with_image(client, project_id),
+            "character_ids": character_ids,
+        },
+    ).json()["id"]
+
+
 def _background_with_image(client: TestClient, project_id: str) -> str:
     background_id = client.post(
         f"/api/v1/projects/{project_id}/background-assets", json={"name": "教室"}
@@ -92,14 +106,17 @@ def test_compose_produces_still_image(client: TestClient, fake_comfy: dict) -> N
     project_id = _project(client)
     character_id = _character_with_image(client, project_id)
     background_id = _background_with_image(client, project_id)
-    still_image_id = client.post(
+    still_image = client.post(
         f"/api/v1/projects/{project_id}/still-images",
         json={
             "name": "登校",
             "background_asset_id": background_id,
             "character_ids": [character_id],
         },
-    ).json()["id"]
+    ).json()
+    # 作り方を選ばずに作った静止画は、指示文で合成する。
+    assert still_image["composition_method"] == "text"
+    still_image_id = still_image["id"]
 
     composed = client.post(
         f"/api/v1/still-images/{still_image_id}/compose",
@@ -122,6 +139,8 @@ def test_compose_produces_still_image(client: TestClient, fake_comfy: dict) -> N
     still_image = client.get(f"/api/v1/still-images/{still_image_id}").json()
     assert still_image["has_image"] is True
     assert still_image["composition_job_id"] == job_id
+    # ComfyUI へ渡した指示文を、画像と一緒に記録して画面で参照できるようにする。
+    assert still_image["source_prompt"] == workflow["20"]["inputs"]["prompt"]
 
     image_file = client.get(f"/api/v1/still-images/{still_image_id}/image")
     assert image_file.status_code == 200
@@ -134,10 +153,7 @@ def test_compose_without_a_figure_is_rejected(client: TestClient, fake_comfy: di
     character_id = client.post(
         f"/api/v1/projects/{project_id}/characters", json={"name": "立ち絵なし"}
     ).json()["id"]
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "未完成", "character_ids": [character_id]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "未完成", [character_id])
 
     still_image = client.get(f"/api/v1/still-images/{still_image_id}").json()
     assert still_image["can_compose"] is False
@@ -153,14 +169,8 @@ def test_compose_without_a_figure_is_rejected(client: TestClient, fake_comfy: di
 def test_compose_is_queued_when_gpu_busy(client: TestClient, fake_comfy: dict) -> None:
     project_id = _project(client)
     character_id = _character_with_image(client, project_id)
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "一枚目", "character_ids": [character_id]},
-    ).json()["id"]
-    second_still_image = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "二枚目", "character_ids": [character_id]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "一枚目", [character_id])
+    second_still_image = _text_still_image(client, project_id, "二枚目", [character_id])
 
     # 実行中のGPUジョブを1件作っておく（合成ジョブが占有中の状態を模す）。
     busy = main.jobs.create(_busy_job())
@@ -196,10 +206,7 @@ def test_compose_prompt_carries_the_project_style(client: TestClient, fake_comfy
         json={"name": "写実", "illustration_style": "昭和の映画風実写写真。フォトリアリスティック。"},
     ).json()["id"]
     character_id = _character_with_image(client, project_id)
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "対決", "character_ids": [character_id]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "対決", [character_id])
 
     composed = client.post(
         f"/api/v1/still-images/{still_image_id}/compose",
@@ -216,10 +223,7 @@ def test_compose_accepts_the_careful_quality(client: TestClient, fake_comfy: dic
     """画面から「丁寧に合成」を選べる（高速化LoRA無し・ステップ増）。"""
     project_id = _project(client)
     character_id = _character_with_image(client, project_id)
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "丁寧", "character_ids": [character_id]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "丁寧", [character_id])
 
     composed = client.post(
         f"/api/v1/still-images/{still_image_id}/compose",
@@ -237,10 +241,7 @@ def test_compose_uses_the_chosen_figure(client: TestClient, fake_comfy: dict) ->
     project_id = _project(client)
     character_id = _character_with_image(client, project_id)
     coat = _add_figure(client, character_id, label="コート")
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "冬の朝", "character_ids": [character_id]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "冬の朝", [character_id])
 
     # 何も選んでいないうちは既定の立ち絵（先に作った1枚）。
     listed = client.get(f"/api/v1/still-images/{still_image_id}/characters").json()
@@ -314,10 +315,7 @@ def _two_person_still_image(client: TestClient) -> tuple[str, str, str]:
     project_id = _project(client)
     first = _character_with_image(client, project_id, name="花子")
     second = _character_with_image(client, project_id, name="しおり")
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "通り", "character_ids": [first, second]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "通り", [first, second])
     return still_image_id, first, second
 
 
@@ -416,10 +414,7 @@ def test_rejected_compose_does_not_save_the_specs(client: TestClient, fake_comfy
     character_id = client.post(
         f"/api/v1/projects/{project_id}/characters", json={"name": "立ち絵なし"}
     ).json()["id"]
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "未完成", "character_ids": [character_id]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "未完成", [character_id])
 
     response = client.post(
         f"/api/v1/still-images/{still_image_id}/compose",
@@ -453,10 +448,7 @@ def test_choosing_a_figure_keeps_the_saved_spec(client: TestClient, fake_comfy: 
     project_id = _project(client)
     character_id = _character_with_image(client, project_id)
     coat = _add_figure(client, character_id, label="コート")
-    still_image_id = client.post(
-        f"/api/v1/projects/{project_id}/still-images",
-        json={"name": "冬の朝", "character_ids": [character_id]},
-    ).json()["id"]
+    still_image_id = _text_still_image(client, project_id, "冬の朝", [character_id])
     client.post(
         f"/api/v1/still-images/{still_image_id}/compose",
         json={

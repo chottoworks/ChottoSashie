@@ -46,6 +46,8 @@ def _to_still_image(row: Row) -> StillImageRead:
         composition_job_id=row["composition_job_id"],
         has_image=bool(row["image_path"]),
         image_version=str(row["image_revision"]),
+        composition_method=row["composition_method"],
+        source_prompt=row["source_prompt"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -116,8 +118,8 @@ class StillImageRepository:
                 """
                 INSERT INTO still_images(
                     id, project_id, ordinal, name, background_asset_id,
-                    character_ids_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    character_ids_json, composition_method, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     still_image_id,
@@ -126,6 +128,7 @@ class StillImageRepository:
                     request.name,
                     request.background_asset_id,
                     json.dumps(request.character_ids, ensure_ascii=False),
+                    str(request.composition_method),
                     timestamp,
                     timestamp,
                 ),
@@ -171,6 +174,8 @@ class StillImageRepository:
                 columns["background_asset_id"] = updates["background_asset_id"]
             if "character_ids" in updates:
                 columns["character_ids_json"] = json.dumps(updates["character_ids"], ensure_ascii=False)
+            if updates.get("composition_method") is not None:
+                columns["composition_method"] = str(updates["composition_method"])
             assignments = ", ".join(f"{name} = ?" for name in columns)
             cursor = connection.execute(
                 f"UPDATE still_images SET {assignments}, updated_at = ? WHERE id = ?",
@@ -211,15 +216,19 @@ class StillImageRepository:
                 raise StillImageNotFoundError(still_image_id)
         return self.get(still_image_id)
 
-    def set_image(self, still_image_id: str, image_path: Path) -> StillImageRead:
+    def set_image(
+        self, still_image_id: str, image_path: Path, *, source_prompt: str
+    ) -> StillImageRead:
+        """合成した画像と、そのとき ComfyUI へ渡した指示文を一緒に書く。"""
         with self.database.connect() as connection:
             cursor = connection.execute(
                 """
                 UPDATE still_images
-                SET image_path = ?, image_revision = image_revision + 1, updated_at = ?
+                SET image_path = ?, image_revision = image_revision + 1, source_prompt = ?,
+                    updated_at = ?
                 WHERE id = ?
                 """,
-                (str(image_path), _now(), still_image_id),
+                (str(image_path), source_prompt, _now(), still_image_id),
             )
             if cursor.rowcount != 1:
                 raise StillImageNotFoundError(still_image_id)

@@ -135,6 +135,17 @@
       "external_read_only_reuse": true
     },
     {
+      "id": "birefnet_background_removal",
+      "display_name_ja": "BiRefNet 背景除去モデル（静止画の合成で人物を切り抜く）",
+      "download_url": "https://huggingface.co/Comfy-Org/BiRefNet/resolve/884af709e9b795d89dafbf97f29c8d6a2386f5c6/background_removal/birefnet.safetensors",
+      "destination": "models/background_removal/birefnet.safetensors",
+      "size_bytes": 444473596,
+      "sha256": "9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154",
+      "license": "MIT",
+      "source": "https://huggingface.co/Comfy-Org/BiRefNet",
+      "external_read_only_reuse": true
+    },
+    {
       "id": "z-image-turbo-diffusion",
       "display_name_ja": "Z-Image-Turbo 生成モデル",
       "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/4895ae2dfb1431b12904ae792c7ec0a1770b6f55/split_files/diffusion_models/z_image_turbo_bf16.safetensors",

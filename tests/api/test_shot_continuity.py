@@ -81,7 +81,7 @@ def _still_image_with_image(client: TestClient) -> str:
     image_dir.mkdir(parents=True, exist_ok=True)
     image_file = image_dir / f"{still_image_id}.png"
     image_file.write_bytes(_TINY_PNG)
-    StillImageRepository(main.database).set_image(still_image_id, image_file)
+    StillImageRepository(main.database).set_image(still_image_id, image_file, source_prompt="")
     return still_image_id
 
 
@@ -126,7 +126,7 @@ def test_start_frame_version_follows_the_picture_it_points_to(
     # カット1の起点は静止画。合成し直すと、同じ場所へ書いても版が変わる。
     from_still = version(shot1)
     StillImageRepository(main.database).set_image(
-        still_image_id, main._STILL_IMAGE_ROOT / f"{still_image_id}.png"
+        still_image_id, main._STILL_IMAGE_ROOT / f"{still_image_id}.png", source_prompt=""
     )
     assert version(shot1) != from_still
 

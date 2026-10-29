@@ -36,6 +36,11 @@ const info: StillImageCharacter = {
   figure_label: "ラベルf1",
   figure_url: "/api/v1/character-figures/f1/image?v=x",
   has_figure: true,
+  pose_url: null,
+  pose_spec: null,
+  pose_prompt: null,
+  pose_outdated: false,
+  layout: { x: 0.5, y: 0.9, height: 0.42 },
 };
 
 describe("静止画で使う立ち絵", () => {

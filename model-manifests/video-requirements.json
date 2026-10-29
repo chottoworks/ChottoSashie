@@ -53,7 +53,14 @@
         "EmptySD3LatentImage",
         "KSampler",
         "VAEDecode",
-        "SaveImage"
+        "SaveImage",
+        "LoadBackgroundRemovalModel",
+        "RemoveBackground",
+        "MaskToImage",
+        "LoadImageMask",
+        "VAEEncode",
+        "SetLatentNoiseMask",
+        "DifferentialDiffusion"
       ],
       "models": [
         {
@@ -61,6 +68,12 @@
           "input": "unet_name",
           "file": "qwen_image_edit_2511_fp8mixed.safetensors",
           "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (fp8mixed)"
+        },
+        {
+          "loader": "LoadBackgroundRemovalModel",
+          "input": "bg_removal_name",
+          "file": "birefnet.safetensors",
+          "display_name_ja": "BiRefNet 背景除去モデル（人物を切り抜いて背景に置く）"
         },
         {
           "loader": "CLIPLoader",

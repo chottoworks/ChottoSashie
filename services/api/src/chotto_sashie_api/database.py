@@ -17,7 +17,7 @@ from .translation import TRANSLATION_TABLE_DDL
 
 # DBの形の版。下の SCHEMA は常に最新の形を書き、新しく作るDBはこの版から始まる。
 # 形を変えるときは版を1つ上げ、前の版のDBを追いつかせる手順を `_MIGRATIONS` に足す。
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -157,6 +157,11 @@ CREATE TABLE IF NOT EXISTS still_images (
     image_path TEXT NOT NULL DEFAULT '',
     -- 合成した画像を書くたびに1つ増やす（画像の版）。合成を始めた時点では増やさない。
     image_revision INTEGER NOT NULL DEFAULT 0,
+    -- 作り方。placed=人物の姿を背景に置いてなじませる / text=指示文で1枚に描き起こす。
+    composition_method TEXT NOT NULL DEFAULT 'text'
+        CHECK (composition_method IN ('placed', 'text')),
+    -- 今の画像を合成するときに ComfyUI へ渡した指示文。画像と一緒に書く。空なら記録が無い。
+    source_prompt TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(project_id, ordinal)
@@ -165,7 +170,7 @@ CREATE TABLE IF NOT EXISTS still_images (
 CREATE INDEX IF NOT EXISTS idx_still_images_project_ordinal
 ON still_images(project_id, ordinal);
 
--- 静止画ごとの人物: どの立ち絵を使うかと、姿勢・表情・向き・配置の指定。
+-- 静止画ごとの人物: どの立ち絵を使うか、姿勢・表情・向き・配置の指定、置いて合成するときの姿と位置。
 {STILL_IMAGE_CHARACTERS_TABLE_DDL}
 
 -- カット: 1枚の静止画から始まるシーンの、連続する動画区間。前カットの最終フレームを次カットの
@@ -322,11 +327,45 @@ def _add_image_revisions(connection: sqlite3.Connection) -> None:
         )
 
 
+def _add_placed_composition(connection: sqlite3.Connection) -> None:
+    """静止画の作り方と、置いて合成するときの人物の姿・位置の列を足す。
+
+    前の版の静止画は、これまでどおり指示文で合成する。置いて合成へ切り替えたときは、
+    姿を作り、位置は既定の並びから始める。
+    """
+    connection.execute(
+        "ALTER TABLE still_images ADD COLUMN composition_method TEXT NOT NULL DEFAULT 'text' "
+        "CHECK (composition_method IN ('placed', 'text'))"
+    )
+    for definition in (
+        "pose_image_path TEXT NOT NULL DEFAULT ''",
+        "pose_revision INTEGER NOT NULL DEFAULT 0",
+        "pose_figure_id TEXT NOT NULL DEFAULT ''",
+        "pose_spec_json TEXT NOT NULL DEFAULT ''",
+        "pose_job_id TEXT NOT NULL DEFAULT ''",
+        "layout_json TEXT NOT NULL DEFAULT ''",
+    ):
+        connection.execute(f"ALTER TABLE still_image_characters ADD COLUMN {definition}")
+
+
+def _add_composition_prompts(connection: sqlite3.Connection) -> None:
+    """静止画と人物の姿に、作るときに ComfyUI へ渡した指示文の列を足す。
+
+    前の版で作った画像と姿の指示文は分からないので、記録が無いままにする。
+    """
+    connection.execute(
+        "ALTER TABLE still_images ADD COLUMN source_prompt TEXT NOT NULL DEFAULT ''"
+    )
+    connection.execute("ALTER TABLE still_image_characters ADD COLUMN pose_prompt TEXT")
+
+
 # 版ごとの移行手順。キーの版へ上げるために、1つ前の版のDBへ行う変更。
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _add_portrait_crop,
     3: _add_asset_input_prompt,
     4: _add_image_revisions,
+    5: _add_placed_composition,
+    6: _add_composition_prompts,
 }
 
 

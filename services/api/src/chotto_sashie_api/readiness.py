@@ -3,6 +3,7 @@
 押せるのに必ず失敗するボタンを無くすため、判定は生成側と同じ根拠から作る。
 合成は `resolve_still_image_sources`、カットの動画生成は起点フレームの有無で、
 実行時と同じ条件を先に評価して理由を返す。UIはこれを表示するだけにする。
+置いて合成する静止画は `resolve_placed_sources` を通す。
 """
 
 from __future__ import annotations
@@ -16,8 +17,14 @@ def still_image_compose_block_reason(database, still_image) -> str:  # noqa: ANN
     from .assets import AssetNotFoundError
     from .characters import CharacterNotFoundError
 
+    from .placed_composition import resolve_placed_sources
+    from .schemas import CompositionMethod
+
     try:
-        resolve_still_image_sources(database, still_image)
+        if still_image.composition_method == CompositionMethod.PLACED:
+            resolve_placed_sources(database, still_image)
+        else:
+            resolve_still_image_sources(database, still_image)
     except CompositionError as error:
         return str(error)
     except (CharacterNotFoundError, AssetNotFoundError):

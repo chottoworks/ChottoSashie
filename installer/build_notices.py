@@ -204,6 +204,7 @@ def build() -> Path:
 | ComfyUI（Windows ポータブル） | GPL-3.0 | 別プロセスとして起動し、HTTPで呼ぶだけ |
 | ffmpeg（GyanD の Windows ビルド） | GPL-3.0 | 別プロセスとして呼ぶだけ |
 | Z-Image / Qwen-Image-Edit / Wan 2.2 ほか | Apache-2.0 | 取得先は `model-manifests/video-models.json` |
+| BiRefNet（背景除去） | MIT | 取得先は `model-manifests/video-models.json` |
 | MiniMax H3（任意） | MiniMax H3 Community License Agreement | 地域と用途に制限あり。取得の手前で条件を出し、同意を得る |
 """
     _OUTPUT.write_text(document, encoding="utf-8")

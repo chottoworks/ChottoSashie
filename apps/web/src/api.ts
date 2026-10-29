@@ -388,7 +388,12 @@ export interface StillImage {
   /** 合成できるか。できないときは理由を compose_blocked_reason に入れる。 */
   can_compose: boolean;
   compose_blocked_reason: string;
+  /** 作り方。placed=人物の姿を背景に置いてなじませる / text=指示文で1枚に描き起こす。 */
+  composition_method: CompositionMethod;
+  /** 今の画像を合成するときに ComfyUI へ渡したプロンプト。空なら記録が無い。 */
+  source_prompt: string;
 }
+export type CompositionMethod = "placed" | "text";
 /** ビートの実現方法。single=1回で生成 / split=区間ごとに生成して繋ぐ。 */
 export type TimelineMode = "single" | "split";
 /** 構図を変えて作り直すフレームの位置。 */
@@ -1085,8 +1090,10 @@ export const composeStillImage = (
     prompt?: string;
     base_url?: string;
     quality?: "fast" | "careful";
-    /** 画面に出ている人物ごとの指定。合成と一緒に保存され、その内容で合成する。 */
+    /** 画面に出ている人物ごとの指定。合成と一緒に保存され、その内容で合成する（指示文で描き起こすとき）。 */
     character_specs?: Record<string, StillImageCharacterSpec>;
+    /** 画面で置いた人物の位置。合成と一緒に保存され、その位置で合成する（置いて合成するとき）。 */
+    layouts?: Record<string, StillImageCharacterLayout>;
   },
 ) =>
   apiSend<{ still_image: StillImage; job_id: string }>(`/api/v1/still-images/${stillImageId}/compose`, "POST", input, "合成を開始できませんでした");
@@ -1096,6 +1103,7 @@ export const updateStillImage = (
     name?: string;
     background_asset_id?: string | null;
     character_ids?: string[];
+    composition_method?: CompositionMethod;
   },
 ) => apiSend<StillImage>(`/api/v1/still-images/${stillImageId}`, "PATCH", input, "静止画を変更できませんでした");
 export const deleteStillImage = (stillImageId: string) =>
@@ -1107,6 +1115,9 @@ export interface CompositionLimits {
   max_reference_images: number;
   /** 1枚に入れられる人物の数。 */
   max_characters: number;
+  /** 出来上がる静止画の大きさ。人物を置く画面は、この縦横比で背景を見せる。 */
+  width: number;
+  height: number;
 }
 export const getCompositionLimits = () =>
   apiGet<CompositionLimits>("/api/v1/composition/limits", "合成の上限を取得できませんでした");
@@ -1462,7 +1473,41 @@ export interface StillImageCharacter {
   figure_label: string;
   figure_url: string | null;
   has_figure: boolean;
+  /** 置いて合成するときの姿（切り抜いた透過画像）。まだ作っていなければ null。 */
+  pose_url: string | null;
+  /** 姿を作ったときの指定。書きかけの指定と比べて、作り直しが要るかを出す。 */
+  pose_spec: StillImageCharacterSpec | null;
+  /**
+   * 姿を作るときに ComfyUI へ渡したプロンプト。指定が空で編集しなかったときは空文字。
+   * 姿が無いか、記録が無ければ null。
+   */
+  pose_prompt: string | null;
+  /** 姿を作ったあとに立ち絵か指定が変わった。合成の前に作り直しが要る。 */
+  pose_outdated: boolean;
+  /** 背景の上の位置。まだ置いていなければ既定の並び。 */
+  layout: StillImageCharacterLayout;
 }
+
+/** 背景の上の人物の位置。どれも出来上がる静止画に対する割合。
+ *  x は人物の中心、y は足もとの高さ、height は人物の身長。 */
+export interface StillImageCharacterLayout {
+  x: number;
+  y: number;
+  height: number;
+}
+
+/** この静止画用の人物の姿を作る。指定はこのときに保存される。 */
+export const makeStillImagePose = (
+  stillImageId: string,
+  characterId: string,
+  spec: StillImageCharacterSpec,
+) =>
+  apiSend<{ job_id: string; character: StillImageCharacter }>(
+    `/api/v1/still-images/${stillImageId}/characters/${characterId}/pose`,
+    "POST",
+    { spec },
+    "人物の姿を作り始められませんでした",
+  );
 
 export const listStillImageCharacters = (stillImageId: string) =>
   apiGet<StillImageCharacter[]>(
@@ -1471,7 +1516,8 @@ export const listStillImageCharacters = (stillImageId: string) =>
   );
 
 /** 使う立ち絵を保存する。`figureId` を null にすると既定の立ち絵に戻る。
- *  指定には触れない（指定は合成のときに `composeStillImage` で保存する）。 */
+ *  指定には触れない（指定は、姿を作るとき `makeStillImagePose` か、指示文で描き起こす
+ *  合成のとき `composeStillImage` で保存する）。 */
 export const chooseStillImageFigure = (
   stillImageId: string,
   characterId: string,

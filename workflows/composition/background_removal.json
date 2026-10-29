@@ -1,0 +1,28 @@
+{
+  "_chotto_sashie_bindings": {
+    "source_image": { "node": "101", "input": "image" },
+    "removal_input": { "node": "103", "input": "image" },
+    "background_removal_model": { "node": "102", "input": "bg_removal_name" },
+    "filename_prefix": { "node": "105", "input": "filename_prefix" }
+  },
+  "101": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "pose-source.png" }
+  },
+  "102": {
+    "class_type": "LoadBackgroundRemovalModel",
+    "inputs": { "bg_removal_name": "birefnet.safetensors" }
+  },
+  "103": {
+    "class_type": "RemoveBackground",
+    "inputs": { "bg_removal_model": ["102", 0], "image": ["101", 0] }
+  },
+  "104": {
+    "class_type": "MaskToImage",
+    "inputs": { "mask": ["103", 0] }
+  },
+  "105": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["104", 0], "filename_prefix": "ChottoSashie/still_images/pose-mask" }
+  }
+}
