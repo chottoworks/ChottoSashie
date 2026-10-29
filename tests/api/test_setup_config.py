@@ -129,7 +129,7 @@ def test_generation_uses_configured_base_url(client: TestClient, monkeypatch: py
         json={"mode": "existing_comfyui", "base_url": "http://127.0.0.1:8190"},
     )
 
-    async def submit(_self, workflow, _client_id):
+    async def submit(_self, workflow):
         return "gen-1"
 
     async def history(_self, prompt_id):

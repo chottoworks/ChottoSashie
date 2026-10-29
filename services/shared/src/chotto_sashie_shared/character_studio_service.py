@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from .candidates import (
     CandidateNotFoundError,
@@ -19,6 +18,7 @@ from .candidates import (
 )
 from .character_schemas import CandidateGenerateRequest, CharacterRead
 from .comfy_client import ComfyClient, ComfyConnectionError, output_images
+from .comfy_progress import JobProgressWriter, PromptProgress
 from .comfy_scratch import ComfyScratch
 from .comfy_workflows import bind_turbo_workflow
 from .jobs import InvalidTransitionError, JobNotFoundError, JobRepository, JobTransition
@@ -79,7 +79,7 @@ async def submit_candidate_batch(
                 f"{output_root}/characters/{character.id}/candidates/{job_id}/{index + 1:02d}"
             ),
         )
-        prompt_id = await client.submit(workflow, str(uuid4()))
+        prompt_id = await client.submit(workflow)
         repository.mark_running(candidate.id, prompt_id)
         first_prompt_id = first_prompt_id or prompt_id
 
@@ -107,29 +107,26 @@ async def monitor_candidate_batch(
     client = ComfyClient(base_url)
     pending = set(candidate_ids)
     total = len(candidate_ids)
+    writer = JobProgressWriter(jobs, job_id)
     try:
-        jobs.transition(
-            job_id,
-            JobTransition(state="running", progress=0.1, message=f"人物候補を生成しています（0/{total}）"),
-        )
+        writer.write(0.1, f"人物候補を生成しています（0/{total}）")
         for _ in range(max_polls):
             # 利用者が中止したら、ここで静かに降りる（状態はすでに cancelled）。
             if jobs.is_cancelled(job_id):
                 return
-            changed = False
+            # ComfyUIは1枚ずつ順に描く。いま描いている1枚の途中経過を、済んだ枚数に足す。
+            current: PromptProgress | None = None
             for candidate_id in list(pending):
                 candidate = repository.get(candidate_id)
                 if candidate.state in {"completed", "failed"}:
                     pending.remove(candidate_id)
-                    changed = True
                     continue
                 if not candidate.prompt_id:
                     continue
                 entry = await client.history(candidate.prompt_id)
-                if entry is None:
-                    continue
-                status = entry.get("status", {})
+                status = entry.get("status", {}) if entry is not None else {}
                 if not isinstance(status, dict) or not status.get("completed"):
+                    current = current or client.prompt_progress(candidate.prompt_id)
                     continue
                 images = output_images(entry)
                 if status.get("status_str") == "success" and images:
@@ -144,17 +141,14 @@ async def monitor_candidate_batch(
                 if scratch is not None and not keep:
                     scratch.discard_outputs(images)
                 pending.remove(candidate_id)
-                changed = True
 
             finished = total - len(pending)
-            if changed and pending:
-                jobs.transition(
-                    job_id,
-                    JobTransition(
-                        state="running",
-                        progress=min(0.9, 0.1 + 0.8 * finished / total),
-                        message=f"人物候補を生成しています（{finished}/{total}）",
-                    ),
+            if pending:
+                drawing = current.fraction if current is not None else 0.0
+                message = f"人物候補を生成しています（{finished}/{total}）"
+                writer.write(
+                    min(0.9, 0.1 + 0.8 * (finished + drawing) / total),
+                    current.describe(message) if current is not None else message,
                 )
             if not pending:
                 candidates = [repository.get(candidate_id) for candidate_id in candidate_ids]

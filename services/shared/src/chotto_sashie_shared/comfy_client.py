@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 
+from .comfy_progress import PromptProgress, progress_watcher
+
 
 CORE_REQUIRED_NODES = {
     "UNETLoader",
@@ -42,17 +44,25 @@ class ComfyClient:
         except (httpx.HTTPError, ValueError) as error:
             raise ComfyConnectionError(f"ComfyUIへ接続できません: {error}") from error
 
-    async def submit(self, workflow: dict[str, Any], client_id: str) -> str:
+    async def submit(self, workflow: dict[str, Any]) -> str:
+        """ワークフローを依頼し、prompt IDを返す。
+
+        途中経過はこのアプリの線（`comfy_progress`）の `client_id` で依頼したものにしか
+        届かないため、依頼の前に線をつないでおき、その `client_id` で送る。
+        """
+        watcher = progress_watcher(self.base_url)
+        await watcher.ensure_listening()
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     f"{self.base_url}/prompt",
-                    json={"prompt": workflow, "client_id": client_id},
+                    json={"prompt": workflow, "client_id": watcher.client_id},
                 )
                 response.raise_for_status()
                 prompt_id = response.json().get("prompt_id")
                 if not isinstance(prompt_id, str) or not prompt_id:
                     raise ComfyConnectionError("ComfyUIからprompt IDが返りませんでした")
+                watcher.track(prompt_id, workflow)
                 return prompt_id
         except httpx.HTTPStatusError as error:
             detail = error.response.text[:2000].strip()
@@ -75,6 +85,10 @@ class ComfyClient:
                 return entry if isinstance(entry, dict) else None
         except (httpx.HTTPError, ValueError) as error:
             raise ComfyConnectionError(f"生成履歴を確認できません: {error}") from error
+
+    def prompt_progress(self, prompt_id: str) -> PromptProgress | None:
+        """依頼したプロンプトの途中経過。何も届いていなければ None。"""
+        return progress_watcher(self.base_url).progress(prompt_id)
 
     async def view_image(self, image: dict[str, str]) -> tuple[bytes, str]:
         try:

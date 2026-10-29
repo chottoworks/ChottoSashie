@@ -161,7 +161,7 @@ async def translate_once(
     """
     workflow = build_translation_workflow(template, text, settings, kind)
     try:
-        prompt_id = await client.submit(workflow, translation_key(text, kind)[:32])
+        prompt_id = await client.submit(workflow)
     except ComfyConnectionError as error:
         raise TranslationUnavailableError(str(error)) from error
     entry = await wait_for(prompt_id)

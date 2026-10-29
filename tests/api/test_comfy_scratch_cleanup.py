@@ -8,6 +8,7 @@ ComfyUIは生成物をまず自分の出力フォルダへ保存し、アプリ�
 
 import base64
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -73,7 +74,8 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch, folders: tuple[Path, Path]) -> d
         captured["uploads"].append(filename)
         return {"name": filename, "subfolder": "", "type": "input"}
 
-    async def submit(_self, workflow, prompt_id):
+    async def submit(_self, workflow):
+        prompt_id = uuid4().hex
         captured["workflows"].append(workflow)
         produced = output_dir / "ChottoSashie" / "made" / f"{prompt_id}.png"
         produced.parent.mkdir(parents=True, exist_ok=True)

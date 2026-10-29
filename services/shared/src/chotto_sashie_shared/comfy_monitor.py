@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .comfy_client import ComfyClient, ComfyConnectionError, output_files
+from .comfy_progress import JobProgressWriter
 from .comfy_scratch import ComfyScratch
 from .jobs import InvalidTransitionError, JobNotFoundError, JobRepository, JobTransition
 
@@ -34,6 +35,11 @@ class MonitorMessages:
 # 成果物（ComfyUIの出力ファイル記述子）を受け取り、保存などを行って
 # ジョブのresultへ載せる辞書を返す。
 OnSuccess = Callable[[list[dict[str, str]]], Awaitable[dict[str, Any] | None]]
+
+
+# ComfyUIが動いている間に進める幅。前は依頼まで、後ろは取り込みと保存に残す。
+RUNNING_START = 0.2
+RUNNING_END = 0.9
 
 
 @dataclass
@@ -68,15 +74,19 @@ async def monitor_comfy_prompt(
         OSError,
         *options.extra_errors,
     )
+    writer = JobProgressWriter(jobs, job_id)
     try:
-        jobs.transition(
-            job_id,
-            JobTransition(state="running", progress=0.2, message=messages.running),
-        )
+        writer.write(RUNNING_START, messages.running)
         for _ in range(options.max_polls):
             # 利用者が中止したら、ここで静かに降りる（状態はすでに cancelled）。
             if jobs.is_cancelled(job_id):
                 return
+            progress = client.prompt_progress(prompt_id)
+            if progress is not None:
+                writer.write(
+                    RUNNING_START + (RUNNING_END - RUNNING_START) * progress.fraction,
+                    progress.describe(messages.running),
+                )
             entry = await client.history(prompt_id)
             if entry is not None:
                 status = entry.get("status", {})

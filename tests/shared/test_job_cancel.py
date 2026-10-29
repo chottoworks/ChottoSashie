@@ -43,6 +43,9 @@ class _NeverFinishingClient:
     async def history(self, prompt_id: str) -> None:  # noqa: ARG002
         return None
 
+    def prompt_progress(self, prompt_id: str) -> None:  # noqa: ARG002
+        return None
+
     async def interrupt(self) -> bool:
         self.interrupted = True
         return True

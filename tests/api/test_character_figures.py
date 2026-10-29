@@ -7,6 +7,7 @@
 
 import base64
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,7 +47,8 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     async def object_info(_self):
         return {"UNETLoader": {"input": {"required": {"unet_name": [submitted["models"]]}}}}
 
-    async def submit(_self, workflow, prompt_id):
+    async def submit(_self, workflow):
+        prompt_id = uuid4().hex
         submitted["workflows"].append(workflow)
         return prompt_id
 

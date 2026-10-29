@@ -30,7 +30,7 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
         captured["uploads"].append({"filename": filename, "content_type": content_type, "size": len(data)})
         return {"name": filename, "subfolder": "", "type": "input"}
 
-    async def submit(_self, workflow, _client_id):
+    async def submit(_self, workflow):
         captured["workflow"] = workflow
         return "compose-1"
 

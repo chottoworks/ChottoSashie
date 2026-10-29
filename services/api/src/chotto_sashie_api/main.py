@@ -26,6 +26,7 @@ from chotto_sashie_shared.comfy_client import (
     load_workflow,
     output_files,
 )
+from chotto_sashie_shared.comfy_progress import JobProgressWriter, close_progress_watchers
 from chotto_sashie_shared.comfy_scratch import ComfyScratch
 from chotto_sashie_shared.deletion import remove_within
 from chotto_sashie_shared.comfy_monitor import (
@@ -499,6 +500,7 @@ async def lifespan(_: FastAPI):
     finally:
         autostart.cancel()
         await gpu_queue.stop()
+        await close_progress_watchers()
         # このAPIが起動した専用ComfyUIだけを停止する。外部プロセスには触れない。
         runtime_manager.shutdown()
 
@@ -1733,7 +1735,7 @@ async def generate_character_figure(
             # 4ステップでは「頭から靴まで入れる」という組み直しの指示が弱く、
             # 胸像のまま返ることがある。参照画像の全身と同じ20ステップで作る。
             apply_high_precision_angle(workflow)
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             repository.mark_running(figure.id, prompt_id)
 
             jobs.transition(
@@ -1862,7 +1864,7 @@ async def start_character_figure_edit(
                 ),
                 careful=True,
             )
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             edits.mark_running(edit.id, prompt_id)
             jobs.transition(
                 job_id,
@@ -2199,7 +2201,7 @@ async def create_background_variation(
                 filename_prefix=f"{OUTPUT_ROOT_NAME}/assets/background_assets/{variation.id}",
                 careful=True,
             )
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             jobs.transition(
                 job_id,
                 JobTransition(
@@ -2345,7 +2347,7 @@ def _build_asset_router(*, table: str, path_prefix: str, not_found_message: str)
                         "filename_prefix": f"{OUTPUT_ROOT_NAME}/assets/{table}/{asset_id}",
                     },
                 )
-                prompt_id = await client.submit(workflow, str(uuid4()))
+                prompt_id = await client.submit(workflow)
                 jobs.transition(
                     job_id,
                     JobTransition(
@@ -2627,7 +2629,7 @@ async def compose_still_image(
                 filename_prefix=f"{OUTPUT_ROOT_NAME}/still_images/{still_image_id}",
                 careful=request.quality is CompositionQuality.CAREFUL,
             )
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             jobs.transition(
                 job_id,
                 JobTransition(
@@ -2718,7 +2720,7 @@ async def _compose_placed_still_image(
             )
             # 描き直すのは人物のまわりだけ。背景は下書き（＝元の背景）の画素のまま残す。
             workflow = build_blend_workflow(composition_workflow, mask_name)
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             jobs.transition(
                 job_id,
                 JobTransition(
@@ -3000,7 +3002,7 @@ async def make_still_image_pose(
                 figure_image=comfy_figure,
                 removal_prefix=f"{OUTPUT_ROOT_NAME}/still_images/poses/{mask_prefix}",
             )
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             jobs.transition(
                 job_id,
                 JobTransition(
@@ -3175,6 +3177,7 @@ async def _await_prompt_files(
     *,
     message: str,
     progress: float,
+    progress_end: float,
     poll_seconds: float = 1.0,
     max_polls: int = 7200,
 ) -> list[dict[str, str]] | None:
@@ -3183,11 +3186,19 @@ async def _await_prompt_files(
     `monitor_comfy_prompt` はジョブを終端（completed/failed）まで進めてしまうため、
     複数のプロンプトを1ジョブで順に流す分割モードでは使えない。ここは待つだけにして、
     ジョブの終端は呼び出し側が決める。利用者が中止したときは None を返す。
+    進み具合は `progress`（始まり）から `progress_end`（終わり）までの間で進める。
     """
-    jobs.transition(job_id, JobTransition(state="running", progress=progress, message=message))
+    writer = JobProgressWriter(jobs, job_id)
+    writer.write(progress, message)
     for _ in range(max_polls):
         if jobs.is_cancelled(job_id):
             return None
+        current = client.prompt_progress(prompt_id)
+        if current is not None:
+            writer.write(
+                progress + (progress_end - progress) * current.fraction,
+                current.describe(message),
+            )
         entry = await client.history(prompt_id)
         if entry is not None:
             status = entry.get("status", {})
@@ -3440,13 +3451,14 @@ async def _run_split_shot_video(
             end_image=end_name,
             prefix=beat.id,
         )
-        prompt_id = await client.submit(workflow, str(uuid4()))
+        prompt_id = await client.submit(workflow)
         files = await _await_prompt_files(
             client,
             job_id,
             prompt_id,
             message=f"ビート {index + 1}/{total} を生成しています",
             progress=0.15 + 0.75 * index / max(1, total),
+            progress_end=0.15 + 0.75 * (index + 1) / max(1, total),
         )
         if files is None:
             return
@@ -4083,7 +4095,7 @@ async def generate_shot_video(
                 end_image=end_name,
                 prefix=shot_id,
             )
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             jobs.transition(
                 job_id,
                 JobTransition(
@@ -4330,7 +4342,7 @@ async def compose_shot_frame(
                 filename_prefix=f"{OUTPUT_ROOT_NAME}/shot_frames/{shot_id}-{request.target.value}",
                 careful=request.quality is CompositionQuality.CAREFUL,
             )
-            prompt_id = await client.submit(workflow, str(uuid4()))
+            prompt_id = await client.submit(workflow)
             jobs.transition(
                 job_id,
                 JobTransition(

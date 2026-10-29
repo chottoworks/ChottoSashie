@@ -19,7 +19,7 @@ def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
     captured: dict = {"workflow": None, "bytes": b"GENERATED-ASSET"}
 
-    async def submit(_self, workflow, _client_id):
+    async def submit(_self, workflow):
         captured["workflow"] = workflow
         return "asset-gen-1"
 

@@ -64,7 +64,7 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
         state["uploads"].append({"filename": filename, "data": data})
         return {"name": filename, "subfolder": "", "type": "input"}
 
-    async def submit(_self, workflow, _client_id):
+    async def submit(_self, workflow):
         state["submits"] += 1
         state["workflows"].append(workflow)
         # 翻訳・合成・動画では、出てくる成果物が違う。

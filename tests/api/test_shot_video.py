@@ -31,7 +31,7 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
         captured["uploads"].append(filename)
         return {"name": filename, "subfolder": "", "type": "input"}
 
-    async def submit(_self, workflow, _client_id):
+    async def submit(_self, workflow):
         captured["workflow"] = workflow
         return "shot-1"
 
@@ -141,7 +141,7 @@ def fake_comfy_h3(monkeypatch: pytest.MonkeyPatch) -> dict:
         captured["uploads"].append(filename)
         return {"name": filename, "subfolder": "", "type": "input"}
 
-    async def submit(_self, workflow, _client_id):
+    async def submit(_self, workflow):
         captured["workflow"] = workflow
         return "shot-h3"
 

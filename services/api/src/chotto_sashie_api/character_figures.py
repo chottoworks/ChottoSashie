@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from chotto_sashie_shared.comfy_client import ComfyClient, ComfyConnectionError, output_images
+from chotto_sashie_shared.comfy_monitor import RUNNING_END, RUNNING_START
+from chotto_sashie_shared.comfy_progress import JobProgressWriter
 from chotto_sashie_shared.comfy_scratch import ComfyScratch
 from chotto_sashie_shared.job_control import CANCEL_MESSAGE
 from chotto_sashie_shared.jobs import (
@@ -585,15 +587,20 @@ async def monitor_figure_image(
     あとのComfyUI側の出力は、`scratch` があれば片付ける。
     """
     client = ComfyClient(base_url)
+    writer = JobProgressWriter(jobs, job_id)
     try:
-        jobs.transition(
-            job_id, JobTransition(state="running", progress=0.1, message=wording.working)
-        )
+        writer.write(RUNNING_START, wording.working)
         for _ in range(max_polls):
             if jobs.is_cancelled(job_id):
                 records.fail(record_id, CANCEL_MESSAGE)
                 return
             record = records.get(record_id)
+            progress = client.prompt_progress(record.prompt_id) if record.prompt_id else None
+            if progress is not None:
+                writer.write(
+                    RUNNING_START + (RUNNING_END - RUNNING_START) * progress.fraction,
+                    progress.describe(wording.working),
+                )
             entry = await client.history(record.prompt_id) if record.prompt_id else None
             status = entry.get("status", {}) if entry is not None else {}
             if not isinstance(status, dict) or not status.get("completed"):

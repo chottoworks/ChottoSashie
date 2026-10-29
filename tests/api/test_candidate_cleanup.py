@@ -6,6 +6,7 @@
 
 import base64
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,7 +37,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 @pytest.fixture
 def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def submit(_self, _workflow, prompt_id):
+    async def submit(_self, _workflow):
+        prompt_id = uuid4().hex
         return prompt_id
 
     async def history(_self, prompt_id):
