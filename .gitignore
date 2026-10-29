@@ -34,3 +34,6 @@ AGENTS.local.md
 
 # 手元の道具（アイコンの作図など）。出来上がりだけをコミットする。
 /tools/
+
+# Tauri がビルドのたびに作る権限の定義（capabilities の入力補完に使う）
+/apps/desktop/src-tauri/gen/schemas/
