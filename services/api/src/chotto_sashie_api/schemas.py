@@ -33,6 +33,16 @@ class CompositionMethod(StrEnum):
     TEXT = "text"
 
 
+# 書き出しで、シーンの切り替わりにかける効果。none=そのままつなぐ / fade=暗転
+# （前のシーンの終わりを黒へ落とし、次のシーンを黒から明るくする）。
+SceneTransition = Literal["none", "fade"]
+# シーンごとの指定。project=作品の設定に従う。
+SceneTransitionChoice = Literal["project", "none", "fade"]
+# 暗くなるまで・明るくなるまでの、それぞれの秒数。
+SCENE_TRANSITION_SECONDS_MIN = 0.1
+SCENE_TRANSITION_SECONDS_MAX = 5.0
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2000)
@@ -44,6 +54,11 @@ class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
     illustration_style: str | None = Field(default=None, max_length=2000)
+    scene_transition: SceneTransition | None = None
+    scene_transition_seconds: float | None = Field(
+        default=None, ge=SCENE_TRANSITION_SECONDS_MIN, le=SCENE_TRANSITION_SECONDS_MAX
+    )
+    scene_transition_edges: bool | None = None
 
 
 class ProjectRead(BaseModel):
@@ -51,6 +66,11 @@ class ProjectRead(BaseModel):
     name: str
     description: str
     illustration_style: str = ""
+    # 書き出しでシーンの切り替わりにかける効果と、その秒数。シーンごとに上書きできる。
+    scene_transition: SceneTransition = "none"
+    scene_transition_seconds: float = 0.5
+    # 動画の始まりと終わりも暗転にするか。
+    scene_transition_edges: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -364,6 +384,11 @@ class StillImageUpdate(BaseModel):
     background_asset_id: str | None = None
     character_ids: list[str] | None = Field(default=None, max_length=8)
     composition_method: CompositionMethod | None = None
+    scene_transition: SceneTransitionChoice | None = None
+    # null を送ると作品の秒数に従う。
+    scene_transition_seconds: float | None = Field(
+        default=None, ge=SCENE_TRANSITION_SECONDS_MIN, le=SCENE_TRANSITION_SECONDS_MAX
+    )
 
 
 class StillImageOrder(BaseModel):
@@ -386,6 +411,9 @@ class StillImageRead(BaseModel):
     image_version: str = ""
     # 今の画像を合成するときに ComfyUI へ渡した指示文。空なら記録が無い。
     source_prompt: str = ""
+    # 書き出しで、前のシーンからこのシーンへ切り替わるときの効果。秒数が None なら作品の秒数。
+    scene_transition: SceneTransitionChoice = "project"
+    scene_transition_seconds: float | None = None
     # 実行できない操作は押せないようにするための判定と、その理由。
     can_compose: bool = True
     compose_blocked_reason: str = ""

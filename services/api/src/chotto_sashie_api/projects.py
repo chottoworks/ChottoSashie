@@ -22,6 +22,9 @@ def _to_project(row: Row) -> ProjectRead:
         name=row["name"],
         description=row["description"],
         illustration_style=row["illustration_style"],
+        scene_transition=row["scene_transition"],
+        scene_transition_seconds=row["scene_transition_seconds"],
+        scene_transition_edges=bool(row["scene_transition_edges"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -53,7 +56,7 @@ class ProjectRepository:
         return self.get(project_id)
 
     def update(self, project_id: str, request: ProjectUpdate) -> ProjectRead:
-        """作品名・説明・画風を更新する。画風は次に作る候補・参照画像から反映される。"""
+        """作品名・説明・画風・書き出しの切り替え効果を更新する。画風は次に作る候補・参照画像から反映される。"""
         current = self.get(project_id)
         updates = request.model_dump(exclude_unset=True)
         updates = {key: value for key, value in updates.items() if value is not None}

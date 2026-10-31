@@ -10,11 +10,14 @@ from chotto_sashie_shared.jobs import JobRepository
 from chotto_sashie_api import exporting, main
 from chotto_sashie_api.database import Database
 from chotto_sashie_api.exporting import (
+    ClipFade,
     ExportError,
+    ExportScene,
     concat_videos,
     cut_frame_rates,
     export_frame_size,
     list_project_shot_videos,
+    plan_scene_fades,
     video_frame_rate,
     video_frame_size,
 )
@@ -101,7 +104,7 @@ def test_export_and_download(client: TestClient, tmp_path: Path, monkeypatch: py
 
     captured: dict = {}
 
-    def fake_concat(ffmpeg, inputs, output, fps):
+    def fake_concat(ffmpeg, inputs, output, fps, fades=None):
         captured["inputs"] = [p.name for p in inputs]
         captured["fps"] = fps
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -195,7 +198,7 @@ def test_export_matches_the_cut_frame_rate(
     monkeypatch.setattr(main, "find_ffmpeg", lambda: "ffmpeg")
     captured: dict = {}
 
-    def fake_concat(_ffmpeg, _inputs, output, fps):
+    def fake_concat(_ffmpeg, _inputs, output, fps, fades=None):
         captured["fps"] = fps
         return _fake_concat(_ffmpeg, _inputs, output, fps)
 
@@ -252,7 +255,7 @@ def test_download_before_export_is_409(client: TestClient) -> None:
 # --- 書き出した動画は残る（開き直しても取り出せる） ---
 
 
-def _fake_concat(_ffmpeg, _inputs, output, _fps):
+def _fake_concat(_ffmpeg, _inputs, output, _fps, fades=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"MP4-DATA")
     return False
@@ -475,3 +478,208 @@ def test_an_unreadable_cut_is_reported_by_its_position(tmp_path: Path) -> None:
 
     with pytest.raises(ExportError, match="2本目"):
         concat_videos(_FFMPEG, [good, broken], tmp_path / "out.mp4", 16.0)
+
+
+# --- シーンの切り替わりの暗転 ---
+
+
+def _scene(*names: str, transition: str = "project", seconds: float | None = None) -> ExportScene:
+    return ExportScene(videos=[Path(name) for name in names], transition=transition, transition_seconds=seconds)
+
+
+def test_fades_go_only_where_the_scene_changes() -> None:
+    """同じシーンの中のカットは前のカットから続けて作るので、つなぎ目に暗転を入れない。"""
+    fades = plan_scene_fades(
+        [_scene("a1", "a2"), _scene("b1", "b2")], transition="fade", seconds=0.5, edges=False
+    )
+    assert fades == [
+        ClipFade(),
+        ClipFade(fade_out=0.5),
+        ClipFade(fade_in=0.5),
+        ClipFade(),
+    ]
+
+
+def test_without_a_transition_scenes_are_joined_as_they_are() -> None:
+    fades = plan_scene_fades([_scene("a"), _scene("b")], transition="none", seconds=0.5, edges=False)
+    assert fades == [ClipFade(), ClipFade()]
+
+
+def test_a_scene_overrides_the_transition_into_it() -> None:
+    """切り替わりの効果は後ろのシーンの指定で決まる。作品の設定と違う指定も、秒数も効く。"""
+    fades = plan_scene_fades(
+        [_scene("a"), _scene("b", transition="fade", seconds=1.2), _scene("c", transition="none")],
+        transition="none",
+        seconds=0.5,
+        edges=False,
+    )
+    assert fades == [ClipFade(fade_out=1.2), ClipFade(fade_in=1.2), ClipFade()]
+
+    fades = plan_scene_fades(
+        [_scene("a"), _scene("b", transition="none"), _scene("c")],
+        transition="fade",
+        seconds=0.5,
+        edges=False,
+    )
+    assert fades == [ClipFade(), ClipFade(fade_out=0.5), ClipFade(fade_in=0.5)]
+
+
+def test_a_scene_without_videos_is_skipped() -> None:
+    """動画の無いシーンは書き出しに出てこないので、前後のシーンが直接つながる。
+    その切り替わりは、後ろの動画のあるシーンの指定に従う。"""
+    fades = plan_scene_fades(
+        [_scene("a"), _scene(transition="none"), _scene("c", transition="fade", seconds=0.8)],
+        transition="none",
+        seconds=0.5,
+        edges=False,
+    )
+    assert fades == [ClipFade(fade_out=0.8), ClipFade(fade_in=0.8)]
+
+
+def test_the_first_scene_has_no_transition_into_it() -> None:
+    fades = plan_scene_fades(
+        [_scene("a", transition="fade"), _scene("b")], transition="none", seconds=0.5, edges=False
+    )
+    assert fades == [ClipFade(), ClipFade()]
+
+
+def test_the_start_and_end_of_the_video_can_fade_too() -> None:
+    fades = plan_scene_fades([_scene("a")], transition="none", seconds=0.7, edges=True)
+    assert fades == [ClipFade(fade_in=0.7, fade_out=0.7)]
+    fades = plan_scene_fades(
+        [_scene("a"), _scene("b", seconds=0.3)], transition="fade", seconds=0.7, edges=True
+    )
+    assert fades == [ClipFade(fade_in=0.7, fade_out=0.3), ClipFade(fade_in=0.3, fade_out=0.7)]
+
+
+def test_transition_settings_are_kept_on_the_project_and_the_scene(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "切り替え"}).json()
+    project_id = project["id"]
+    # 作った作品は、これまでどおりそのままつなぐ。
+    assert project["scene_transition"] == "none"
+    assert project["scene_transition_seconds"] == 0.5
+    assert project["scene_transition_edges"] is False
+
+    updated = client.patch(
+        f"/api/v1/projects/{project_id}",
+        json={"scene_transition": "fade", "scene_transition_seconds": 1.5, "scene_transition_edges": True},
+    ).json()
+    assert updated["scene_transition"] == "fade"
+    assert updated["scene_transition_seconds"] == 1.5
+    assert updated["scene_transition_edges"] is True
+    # 1つだけ変えても、ほかの設定は残る。
+    assert client.patch(
+        f"/api/v1/projects/{project_id}", json={"scene_transition_edges": False}
+    ).json()["scene_transition"] == "fade"
+
+    scene = client.post(f"/api/v1/projects/{project_id}/still-images", json={"name": "S"}).json()
+    assert scene["scene_transition"] == "project"
+    assert scene["scene_transition_seconds"] is None
+
+    scene = client.patch(
+        f"/api/v1/still-images/{scene['id']}",
+        json={"scene_transition": "fade", "scene_transition_seconds": 0.8},
+    ).json()
+    assert (scene["scene_transition"], scene["scene_transition_seconds"]) == ("fade", 0.8)
+    # 秒数は null で作品の秒数に戻せる。種類は変わらない。
+    scene = client.patch(
+        f"/api/v1/still-images/{scene['id']}", json={"scene_transition_seconds": None}
+    ).json()
+    assert (scene["scene_transition"], scene["scene_transition_seconds"]) == ("fade", None)
+
+
+@pytest.mark.parametrize("seconds", [0, 0.05, 5.1])
+def test_transition_seconds_out_of_range_are_refused(client: TestClient, seconds: float) -> None:
+    project_id = client.post("/api/v1/projects", json={"name": "切り替え"}).json()["id"]
+    response = client.patch(
+        f"/api/v1/projects/{project_id}", json={"scene_transition_seconds": seconds}
+    )
+    assert response.status_code == 422
+
+
+def test_export_fades_between_scenes_as_set(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_id = _project_with_shots(client, tmp_path)
+    client.patch(f"/api/v1/projects/{project_id}", json={"scene_transition": "fade"})
+    monkeypatch.setattr(main, "find_ffmpeg", lambda: "ffmpeg")
+    captured: dict = {}
+
+    def fake_concat(ffmpeg, inputs, output, fps, fades=None):
+        captured["fades"] = fades
+        return _fake_concat(ffmpeg, inputs, output, fps)
+
+    monkeypatch.setattr(main, "concat_videos", fake_concat)
+
+    assert client.post(f"/api/v1/projects/{project_id}/export", json={}).status_code == 200
+    assert captured["fades"] == [ClipFade(fade_out=0.5), ClipFade(fade_in=0.5)]
+
+
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        ("  Duration: 00:00:05.17, start: 0.000000, bitrate: 1689 kb/s\n", 5.17),
+        ("  Duration: 01:02:03.50, start: 0.000000\n", 3723.5),
+        # アニメーションwebpは長さを出さない。
+        ("  Duration: N/A, start: 0.000000, bitrate: N/A\n", None),
+    ],
+)
+def test_duration_is_parsed_from_the_input_info(info: str, expected: float | None) -> None:
+    assert exporting.parse_duration(info) == expected
+
+
+def test_webp_duration_is_the_sum_of_the_frame_timing(tmp_path: Path) -> None:
+    """ffmpeg はwebpの長さを出さないが、各コマを書かれた表示時間どおりに読む。"""
+    video = _webp(tmp_path / "cut.webp", 16, frames=10)
+    assert exporting.video_duration(video, "ffmpeg-is-not-used") == pytest.approx(0.62)
+
+
+def _brightness(video: Path, at: float, folder: Path) -> float:
+    """書き出した動画の、指定した時刻のコマの真ん中の明るさ（0〜255）。"""
+    frame = folder / f"frame-{at}.png"
+    _real_ffmpeg("-ss", str(at), "-i", str(video), "-frames:v", "1", str(frame))
+    with Image.open(frame) as image:
+        return image.convert("L").getpixel((image.width // 2, image.height // 2))
+
+
+@needs_ffmpeg
+def test_the_scene_change_fades_through_black(tmp_path: Path) -> None:
+    """白いカット2本を、間に暗転を入れて実際の ffmpeg で繋ぐ。切り替わりの前後は黒く、
+    それ以外は白いまま。音声付きのカットどうしなら、音も残る。"""
+    cuts = []
+    for index in range(2):
+        cut = tmp_path / f"cut-{index}.mp4"
+        _real_ffmpeg(
+            "-f", "lavfi", "-i", "color=c=white:s=160x90:r=24:d=2",
+            "-f", "lavfi", "-i", "sine=d=2",
+            "-c:v", "mpeg4", "-c:a", "aac", "-shortest", str(cut),
+        )
+        cuts.append(cut)
+    output = tmp_path / "out.mp4"
+
+    audio_included = concat_videos(
+        _FFMPEG, cuts, output, 24.0, fades=[ClipFade(fade_out=0.5), ClipFade(fade_in=0.5)]
+    )
+
+    assert audio_included is True
+    assert _brightness(output, 1.0, tmp_path) > 220  # 前のシーンの途中
+    assert _brightness(output, 1.96, tmp_path) < 40  # 前のシーンの終わり
+    assert _brightness(output, 2.02, tmp_path) < 40  # 次のシーンの始まり
+    assert _brightness(output, 3.0, tmp_path) > 220  # 次のシーンの途中
+
+
+@needs_ffmpeg
+def test_a_webp_cut_fades_at_its_own_end(tmp_path: Path) -> None:
+    """Wan のwebpは ffmpeg が長さを出さないので、コマの表示時間から終わりを決めて暗転する。"""
+    wan = tmp_path / "cut.webp"
+    frames = [Image.new("RGB", (160, 90), (255, 255, 255)) for _ in range(32)]
+    # 同じ絵のコマは Pillow が1コマにまとめてしまうので、隅の1画素だけ変えて動画にする。
+    for index, frame in enumerate(frames):
+        frame.putpixel((0, 0), (index * 8, 0, 0))
+    frames[0].save(wan, save_all=True, append_images=frames[1:], duration=62, loop=0)
+    output = tmp_path / "out.mp4"
+
+    concat_videos(_FFMPEG, [wan], output, 16.0, fades=[ClipFade(fade_out=0.5)])
+
+    assert _brightness(output, 0.5, tmp_path) > 220
+    assert _brightness(output, 1.9, tmp_path) < 40

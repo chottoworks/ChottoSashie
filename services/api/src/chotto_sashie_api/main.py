@@ -230,7 +230,9 @@ from .exporting import (
     cut_frame_rates,
     export_root,
     find_ffmpeg,
+    list_project_scenes,
     list_project_shot_videos,
+    plan_scene_fades,
     project_export_path,
 )
 from .image_files import (
@@ -1284,7 +1286,7 @@ def get_project(project_id: str) -> ProjectRead:
 
 @app.patch("/api/v1/projects/{project_id}", response_model=ProjectRead)
 def update_project(project_id: str, request: ProjectUpdate) -> ProjectRead:
-    """作品名・説明・作品全体の画風を更新する。"""
+    """作品名・説明・作品全体の画風・書き出しの切り替え効果を更新する。"""
     try:
         return ProjectRepository(database).update(project_id, request)
     except ProjectNotFoundError as error:
@@ -4577,9 +4579,12 @@ async def start_tool_provision(tool_id: str, background_tasks: BackgroundTasks):
 
 @app.post("/api/v1/projects/{project_id}/export", response_model=ExportResult)
 def export_project(project_id: str, request: ExportRequest) -> ExportResult:
-    """プロジェクトのカット動画を、物語順に1本のmp4へ結合する。"""
+    """プロジェクトのカット動画を、物語順に1本のmp4へ結合する。
+
+    シーンの切り替わりには、作品とシーンに保存した設定に従って暗転をかける。
+    """
     try:
-        ProjectRepository(database).get(project_id)
+        project = ProjectRepository(database).get(project_id)
     except ProjectNotFoundError as error:
         raise HTTPException(status_code=404, detail="作品が見つかりません") from error
 
@@ -4592,9 +4597,16 @@ def export_project(project_id: str, request: ExportRequest) -> ExportResult:
                 "「設定を確認・変更」→「設定を変更する」→「ComfyUI環境を用意」の「ノードとモデルの確認」から用意できます"
             ),
         )
-    videos = list_project_shot_videos(database, project_id)
+    scenes = list_project_scenes(database, project_id)
+    videos = [video for scene in scenes for video in scene.videos]
     if not videos:
         raise HTTPException(status_code=409, detail="書き出せるカット動画がありません")
+    fades = plan_scene_fades(
+        scenes,
+        transition=project.scene_transition,
+        seconds=project.scene_transition_seconds,
+        edges=project.scene_transition_edges,
+    )
 
     fps = request.fps
     if fps is None:
@@ -4609,7 +4621,7 @@ def export_project(project_id: str, request: ExportRequest) -> ExportResult:
 
     output = project_export_path(settings.data_dir, project_id)
     try:
-        audio_included = concat_videos(ffmpeg, videos, output, fps)
+        audio_included = concat_videos(ffmpeg, videos, output, fps, fades=fades)
     except ExportError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return ExportResult(

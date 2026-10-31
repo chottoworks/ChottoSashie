@@ -34,6 +34,21 @@ _COMPOSITION_PROMPT_COLUMNS = (
 )
 
 
+# 版7で足した、書き出しでシーンの切り替わりにかける効果の列。
+_SCENE_TRANSITION_COLUMNS = (
+    ("projects", "scene_transition"),
+    ("projects", "scene_transition_seconds"),
+    ("projects", "scene_transition_edges"),
+    ("still_images", "scene_transition"),
+    ("still_images", "scene_transition_seconds"),
+)
+
+
+def _drop_scene_transitions(connection) -> None:  # noqa: ANN001
+    for table, column in _SCENE_TRANSITION_COLUMNS:
+        connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+
+
 def _drop_image_revisions(connection) -> None:  # noqa: ANN001
     for table, column in _IMAGE_REVISION_COLUMNS:
         connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
@@ -100,6 +115,7 @@ def test_initialize_brings_a_version_1_database_up_to_date(tmp_path: Path) -> No
     database.initialize()
     # 版1の形へ戻す（代表写真の範囲の列も、欄へ入れた文の列も、画像の版の列もまだ無い）。
     with database.connect() as connection:
+        _drop_scene_transitions(connection)
         connection.execute("ALTER TABLE characters DROP COLUMN portrait_crop")
         _drop_image_revisions(connection)
         _drop_composition_prompts(connection)
@@ -137,6 +153,7 @@ def test_initialize_starts_the_image_versions_of_a_version_3_database(tmp_path: 
     database = Database(tmp_path / "video-api.sqlite3")
     database.initialize()
     with database.connect() as connection:
+        _drop_scene_transitions(connection)
         _drop_image_revisions(connection)
         _drop_composition_prompts(connection)
         _drop_placed_composition(connection)
@@ -179,6 +196,7 @@ def test_initialize_fills_the_typed_prompt_of_version_2_assets(tmp_path: Path) -
         "作品全体の画風: 淡い水彩"
     )
     with database.connect() as connection:
+        _drop_scene_transitions(connection)
         _drop_image_revisions(connection)
         _drop_composition_prompts(connection)
         _drop_placed_composition(connection)
@@ -223,6 +241,7 @@ def test_initialize_keeps_the_still_images_of_a_version_4_database_text(tmp_path
     database = Database(tmp_path / "video-api.sqlite3")
     database.initialize()
     with database.connect() as connection:
+        _drop_scene_transitions(connection)
         _drop_composition_prompts(connection)
         _drop_placed_composition(connection)
         connection.execute("UPDATE schema_meta SET value = '4' WHERE key = 'schema_version'")
@@ -262,6 +281,7 @@ def test_initialize_leaves_the_prompts_of_a_version_5_database_unrecorded(tmp_pa
     database = Database(tmp_path / "video-api.sqlite3")
     database.initialize()
     with database.connect() as connection:
+        _drop_scene_transitions(connection)
         _drop_composition_prompts(connection)
         connection.execute("UPDATE schema_meta SET value = '5' WHERE key = 'schema_version'")
         connection.execute(
@@ -289,6 +309,43 @@ def test_initialize_leaves_the_prompts_of_a_version_5_database_unrecorded(tmp_pa
         chosen = connection.execute("SELECT pose_prompt FROM still_image_characters").fetchone()
     assert still_image["source_prompt"] == ""
     assert chosen["pose_prompt"] is None
+
+
+def test_initialize_joins_the_scenes_of_a_version_6_database_as_before(tmp_path: Path) -> None:
+    """版6のDBの作品は、これまでどおりシーンをそのままつなぐ。シーンは作品の設定に従う。"""
+    database = Database(tmp_path / "video-api.sqlite3")
+    database.initialize()
+    with database.connect() as connection:
+        _drop_scene_transitions(connection)
+        connection.execute("UPDATE schema_meta SET value = '6' WHERE key = 'schema_version'")
+        connection.execute(
+            "INSERT INTO projects(id, name, created_at, updated_at) VALUES ('p', '作品', 'now', 'now')"
+        )
+        connection.execute(
+            "INSERT INTO still_images(id, project_id, ordinal, name, created_at, updated_at) "
+            "VALUES ('s', 'p', 1, '静止画', 'now', 'now')"
+        )
+
+    database.initialize()
+
+    with database.connect() as connection:
+        version = connection.execute(
+            "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+        ).fetchone()["value"]
+        project = connection.execute(
+            "SELECT scene_transition, scene_transition_seconds, scene_transition_edges "
+            "FROM projects WHERE id = 'p'"
+        ).fetchone()
+        scene = connection.execute(
+            "SELECT scene_transition, scene_transition_seconds FROM still_images WHERE id = 's'"
+        ).fetchone()
+    assert version == str(SCHEMA_VERSION)
+    assert dict(project) == {
+        "scene_transition": "none",
+        "scene_transition_seconds": 0.5,
+        "scene_transition_edges": 0,
+    }
+    assert dict(scene) == {"scene_transition": "project", "scene_transition_seconds": None}
 
 
 def test_initialize_refuses_a_database_from_a_newer_app(tmp_path: Path) -> None:

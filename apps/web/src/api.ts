@@ -320,9 +320,22 @@ export interface Project {
   description: string;
   /** 作品全体の画風。人物候補・立ち絵・背景・小物・静止画の生成に反映される。 */
   illustration_style: string;
+  /** 書き出しで、シーンの切り替わりにかける効果。シーンごとに上書きできる。 */
+  scene_transition: SceneTransition;
+  /** 暗くなるまで・明るくなるまでの、それぞれの秒数。 */
+  scene_transition_seconds: number;
+  /** 動画の始まりと終わりも暗転にするか。 */
+  scene_transition_edges: boolean;
   created_at: string;
   updated_at: string;
 }
+/** シーンの切り替わりにかける効果。none=そのままつなぐ / fade=暗転。 */
+export type SceneTransition = "none" | "fade";
+/** シーンごとの指定。project=作品の設定に従う。 */
+export type SceneTransitionChoice = "project" | SceneTransition;
+/** 暗転の秒数として受け付ける範囲（APIと同じ）。 */
+export const SCENE_TRANSITION_SECONDS_MIN = 0.1;
+export const SCENE_TRANSITION_SECONDS_MAX = 5;
 export interface Character {
   id: string;
   project_id: string;
@@ -395,6 +408,10 @@ export interface StillImage {
   /** シーンとしての進み具合。カットの数と、そのうち動画のあるカットの数。 */
   shot_count: number;
   shot_video_count: number;
+  /** 書き出しで、前のシーンからこのシーンへ切り替わるときの効果。 */
+  scene_transition: SceneTransitionChoice;
+  /** 暗転の秒数。null なら作品の秒数に従う。 */
+  scene_transition_seconds: number | null;
 }
 export type CompositionMethod = "placed" | "text";
 /** ビートの実現方法。single=1回で生成 / split=区間ごとに生成して繋ぐ。 */
@@ -861,7 +878,14 @@ export const createProject = (input: {
   apiSend<Project>("/api/v1/projects", "POST", input, "プロジェクトを作成できませんでした");
 export const updateProject = (
   projectId: string,
-  input: { name?: string; description?: string; illustration_style?: string },
+  input: {
+    name?: string;
+    description?: string;
+    illustration_style?: string;
+    scene_transition?: SceneTransition;
+    scene_transition_seconds?: number;
+    scene_transition_edges?: boolean;
+  },
 ) => apiSend<Project>(`/api/v1/projects/${projectId}`, "PATCH", input, "作品設定を更新できませんでした");
 export const deleteProject = (projectId: string) =>
   apiDelete(`/api/v1/projects/${projectId}`, "作品を削除できませんでした");
@@ -1115,6 +1139,9 @@ export const updateStillImage = (
     background_asset_id?: string | null;
     character_ids?: string[];
     composition_method?: CompositionMethod;
+    scene_transition?: SceneTransitionChoice;
+    /** null を送ると作品の秒数に従う。 */
+    scene_transition_seconds?: number | null;
   },
 ) => apiSend<StillImage>(`/api/v1/still-images/${stillImageId}`, "PATCH", input, "静止画を変更できませんでした");
 export const deleteStillImage = (stillImageId: string) =>

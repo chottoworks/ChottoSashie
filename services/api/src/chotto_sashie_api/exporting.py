@@ -1,8 +1,9 @@
 """カット動画を1本に結合して書き出す（ffmpeg concat）。
 
 プロジェクト内のカット動画を、静止画の並び順→カット順で連結し、どの環境でも再生しやすい
-H.264 mp4 として出力する。ffmpeg は同梱せず、手元にあるものを探して使い、無ければ
-アプリが取得したものを使う（取得は `ffmpeg_provision` が受け持つ）。
+H.264 mp4 として出力する。シーンの切り替わりには、作品とシーンの設定に従って暗転を
+かけられる。ffmpeg は同梱せず、手元にあるものを探して使い、無ければアプリが取得した
+ものを使う（取得は `ffmpeg_provision` が受け持つ）。
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import io
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
@@ -94,9 +96,8 @@ def parse_video_frame_rate(info: str) -> float | None:
     return None
 
 
-def _webp_frame_rate(video: Path) -> float | None:
-    """アニメーションwebpのfps。コマの表示時間はミリ秒の整数で入っているので、整数へ丸める
-    （ComfyUI は 16fps を 62ms と書くため、そのまま割ると 16.13 になる）。"""
+def _webp_frame_durations(video: Path) -> list[int] | None:
+    """アニメーションwebpの各コマの表示時間（ミリ秒）。読めなければ None。"""
     durations: list[int] = []
     try:
         with Image.open(video) as image:
@@ -107,10 +108,49 @@ def _webp_frame_rate(video: Path) -> float | None:
                 durations.append(int(image.info.get("duration", 0)))
     except (OSError, ValueError):
         return None
-    total = sum(durations)
-    if total <= 0:
+    return durations
+
+
+def _webp_frame_rate(video: Path) -> float | None:
+    """アニメーションwebpのfps。コマの表示時間はミリ秒の整数で入っているので、整数へ丸める
+    （ComfyUI は 16fps を 62ms と書くため、そのまま割ると 16.13 になる）。"""
+    durations = _webp_frame_durations(video)
+    if not durations or sum(durations) <= 0:
         return None
-    return float(round(len(durations) * 1000 / total))
+    return float(round(len(durations) * 1000 / sum(durations)))
+
+
+def video_duration(video: Path, ffmpeg_path: str) -> float | None:
+    """カット動画の長さ（秒）。読めなければ None。暗転を始める時刻を決めるのに使う。
+
+    アニメーションwebp（Wan 2.2）は ffmpeg が長さを出さない（Duration: N/A）。ffmpeg は
+    各コマを書かれた表示時間どおりに並べて読むので、その合計が結合のときの長さになる。
+    mp4（MiniMax H3）は、結合に使う ffmpeg 本体が出す長さを読む。
+    """
+    if video.suffix.lower() == ".webp":
+        durations = _webp_frame_durations(video)
+        total = sum(durations or [])
+        return total / 1000 if total > 0 else None
+    # 出力先を指定しないので ffmpeg は失敗で終わるが、入力の情報は stderr に出し終えている。
+    command = [ffmpeg_path, "-hide_banner", "-i", str(video)]
+    try:
+        result = subprocess.run(command, capture_output=True, timeout=60)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return parse_duration(result.stderr.decode("utf-8", errors="replace"))
+
+
+# ffmpeg が入力について出す1行（"  Duration: 00:00:05.17, start: 0.000000, bitrate: ..."）。
+_DURATION = re.compile(r"Duration:\s*(?P<h>\d+):(?P<m>\d{2}):(?P<s>\d{2}(?:\.\d+)?)")
+
+
+def parse_duration(info: str) -> float | None:
+    """ffmpeg の入力情報から長さ（秒）を読む。出ていなければ（N/A など）None。"""
+    match = _DURATION.search(info)
+    if match is None:
+        return None
+    seconds = int(match["h"]) * 3600 + int(match["m"]) * 60 + float(match["s"])
+    return seconds if seconds > 0 else None
 
 
 def cut_frame_rates(videos: list[Path], ffmpeg_path: str | None) -> list[float]:
@@ -162,38 +202,114 @@ def find_ffmpeg() -> str | None:
     return str(found) if found is not None else None
 
 
-def list_project_shot_videos(database: Database, project_id: str) -> list[Path]:
-    """プロジェクト内の生成済みカット動画を、物語順（静止画→カット→ビート）で返す。
+@dataclass(frozen=True)
+class ExportScene:
+    """書き出しに並べる1シーン（静止画1枚）。動画と、前のシーンからの切り替えの指定。"""
+
+    videos: list[Path]
+    # project=作品の設定に従う / none / fade。秒数が None なら作品の秒数。
+    transition: str = "project"
+    transition_seconds: float | None = None
+
+
+def list_project_scenes(database: Database, project_id: str) -> list[ExportScene]:
+    """プロジェクトのシーンを物語順に返す。各シーンの動画は、カット→ビートの順。
 
     分割モードで作ったカットは、ffmpegが無い環境では1本にまとまらず区間動画のまま
     残る。その場合はビートの区間動画を順に並べる（結果として同じ並びになる）。
+    動画が1本も無いシーンも返す（飛ばすかどうかは使う側が決める）。
     """
     with database.connect() as connection:
-        shots = connection.execute(
+        still_images = connection.execute(
             """
-            SELECT sh.id AS id, sh.output_video_path AS path
-            FROM shots sh
-            JOIN still_images sc ON sh.still_image_id = sc.id
-            WHERE sc.project_id = ?
-            ORDER BY sc.ordinal, sh.ordinal
+            SELECT id, scene_transition, scene_transition_seconds FROM still_images
+            WHERE project_id = ?
+            ORDER BY ordinal
             """,
             (project_id,),
         ).fetchall()
-        videos: list[Path] = []
-        for shot in shots:
-            if shot["path"]:
-                videos.append(Path(shot["path"]))
-                continue
-            segments = connection.execute(
+        scenes: list[ExportScene] = []
+        for still_image in still_images:
+            shots = connection.execute(
                 """
-                SELECT segment_video_path AS path FROM shot_beats
-                WHERE shot_id = ? AND segment_video_path != ''
+                SELECT id, output_video_path AS path FROM shots
+                WHERE still_image_id = ?
                 ORDER BY ordinal
                 """,
-                (shot["id"],),
+                (still_image["id"],),
             ).fetchall()
-            videos.extend(Path(row["path"]) for row in segments)
-    return videos
+            videos: list[Path] = []
+            for shot in shots:
+                if shot["path"]:
+                    videos.append(Path(shot["path"]))
+                    continue
+                segments = connection.execute(
+                    """
+                    SELECT segment_video_path AS path FROM shot_beats
+                    WHERE shot_id = ? AND segment_video_path != ''
+                    ORDER BY ordinal
+                    """,
+                    (shot["id"],),
+                ).fetchall()
+                videos.extend(Path(row["path"]) for row in segments)
+            scenes.append(
+                ExportScene(
+                    videos=videos,
+                    transition=still_image["scene_transition"],
+                    transition_seconds=still_image["scene_transition_seconds"],
+                )
+            )
+    return scenes
+
+
+def list_project_shot_videos(database: Database, project_id: str) -> list[Path]:
+    """プロジェクト内の生成済みカット動画を、物語順（静止画→カット→ビート）で返す。"""
+    return [video for scene in list_project_scenes(database, project_id) for video in scene.videos]
+
+
+@dataclass(frozen=True)
+class ClipFade:
+    """カット動画1本にかける暗転。始まりを黒から明るくする秒数と、終わりを黒へ落とす秒数。"""
+
+    fade_in: float = 0.0
+    fade_out: float = 0.0
+
+
+def plan_scene_fades(
+    scenes: list[ExportScene],
+    *,
+    transition: str,
+    seconds: float,
+    edges: bool,
+) -> list[ClipFade]:
+    """シーンの切り替わりにかける暗転を、書き出しに並べるカット動画1本ずつへ割り当てる。
+
+    返す並びは、各シーンの動画を順につなげたものと同じ。暗転はシーンの切り替わりだけに
+    かけ、同じシーンの中のカット（前のカットの最後のコマから続けて作ったもの）と、
+    分割の区間のつなぎ目には入れない。
+
+    切り替わりの効果は後ろのシーンの指定で決まり、`project` なら作品の設定（`transition`
+    と `seconds`）に従う。暗転なら前のシーンの最後の動画を黒へ落とし、後ろのシーンの
+    最初の動画を黒から明るくする。動画の無いシーンは飛ばし、その指定も使わない。
+    `edges` が真なら、動画全体の始まりと終わりにも作品の秒数で暗転をかける。
+    """
+    filled = [scene for scene in scenes if scene.videos]
+    fades = [[ClipFade() for _ in scene.videos] for scene in filled]
+    for index in range(1, len(filled)):
+        scene = filled[index]
+        kind = transition if scene.transition == "project" else scene.transition
+        if kind != "fade":
+            continue
+        length = scene.transition_seconds if scene.transition_seconds is not None else seconds
+        before = fades[index - 1]
+        before[-1] = ClipFade(fade_in=before[-1].fade_in, fade_out=length)
+        after = fades[index]
+        after[0] = ClipFade(fade_in=length, fade_out=after[0].fade_out)
+    if edges and fades:
+        first, last = fades[0], fades[-1]
+        first[0] = ClipFade(fade_in=seconds, fade_out=first[0].fade_out)
+        last[-1] = ClipFade(fade_in=last[-1].fade_in, fade_out=seconds)
+    return [fade for scene_fades in fades for fade in scene_fades]
 
 
 def video_frame_size(ffmpeg_path: str, video: Path) -> tuple[int, int] | None:
@@ -241,7 +357,27 @@ def export_frame_size(sizes: list[tuple[int, int]]) -> tuple[int, int]:
 EXPORT_CRF = 18
 
 
-def concat_videos(ffmpeg_path: str, inputs: list[Path], output: Path, fps: float) -> bool:
+def _fade_filters(name: str, fade: ClipFade, duration: float | None) -> list[str]:
+    """暗転のフィルタ（映像は `fade`、音声は `afade`）。暗転が無ければ空。
+
+    暗転の秒数は動画の長さを超えない（短いカットでは、その長さいっぱいで暗転する）。
+    """
+    filters: list[str] = []
+    if fade.fade_in > 0 and duration is not None:
+        filters.append(f"{name}=t=in:st=0:d={min(fade.fade_in, duration):.3f}")
+    if fade.fade_out > 0 and duration is not None:
+        length = min(fade.fade_out, duration)
+        filters.append(f"{name}=t=out:st={duration - length:.3f}:d={length:.3f}")
+    return filters
+
+
+def concat_videos(
+    ffmpeg_path: str,
+    inputs: list[Path],
+    output: Path,
+    fps: float,
+    fades: list[ClipFade] | None = None,
+) -> bool:
     """入力動画群を連結して1本の mp4 を書き出し、音声を残せたかを返す。
 
     各入力（Wanのアニメーションwebp、またはMiniMax H3の音声付きmp4）をデコードして
@@ -254,9 +390,15 @@ def concat_videos(ffmpeg_path: str, inputs: list[Path], output: Path, fps: float
 
     音声は全カットが持っているときだけ残す。無音のカットが混ざると concat が
     そろわないため、その場合は映像だけを繋ぐ（音声のあるカットを作り直せば残る）。
+
+    `fades` は入力1本ずつの暗転（`plan_scene_fades`）。黒へ落とす時刻を決めるために
+    その動画の長さを読み、音声を残すときは音も同じ時刻・秒数で消して戻す。
     """
     if not inputs:
         raise ExportError("結合する動画がありません")
+    fades = fades or [ClipFade() for _ in inputs]
+    if len(fades) != len(inputs):
+        raise ExportError("暗転の指定と動画の数が合いません")
 
     sizes: list[tuple[int, int]] = []
     for number, video in enumerate(inputs, start=1):
@@ -278,9 +420,30 @@ def concat_videos(ffmpeg_path: str, inputs: list[Path], output: Path, fps: float
         f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
     )
-    fitted = ";".join(f"[{index}:v]{fit}[v{index}]" for index in range(len(inputs)))
+    durations: list[float | None] = []
+    for number, (video, fade) in enumerate(zip(inputs, fades, strict=True), start=1):
+        duration = None
+        if fade.fade_in > 0 or fade.fade_out > 0:
+            duration = video_duration(video, ffmpeg_path)
+            if duration is None:
+                raise ExportError(f"{number}本目のカット動画の長さを読み取れませんでした")
+        durations.append(duration)
+    chains = [
+        f"[{index}:v]" + ",".join([fit, *_fade_filters("fade", fade, duration)]) + f"[v{index}]"
+        for index, (fade, duration) in enumerate(zip(fades, durations, strict=True))
+    ]
+    audio_sources: list[str] = []
     if with_audio:
-        concat_source = "".join(f"[v{index}][{index}:a]" for index in range(len(inputs)))
+        for index, (fade, duration) in enumerate(zip(fades, durations, strict=True)):
+            audio_fades = _fade_filters("afade", fade, duration)
+            if audio_fades:
+                chains.append(f"[{index}:a]" + ",".join(audio_fades) + f"[a{index}]")
+                audio_sources.append(f"[a{index}]")
+            else:
+                audio_sources.append(f"[{index}:a]")
+    fitted = ";".join(chains)
+    if with_audio:
+        concat_source = "".join(f"[v{index}]{audio}" for index, audio in enumerate(audio_sources))
         filter_complex = f"{fitted};{concat_source}concat=n={len(inputs)}:v=1:a=1[outv][outa]"
         mapping = ["-map", "[outv]", "-map", "[outa]", "-c:a", "aac", "-b:a", "192k"]
     else:

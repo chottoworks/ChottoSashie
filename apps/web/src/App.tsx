@@ -5052,13 +5052,19 @@ function ShotPromptPanel({
 /** 1枚の静止画から作るカットの一覧。動画を作る作品だけで使う。 */
 function SceneCutsCard({
   stillImage,
-  projectName,
+  project,
+  isFirstScene,
+  onSceneChanged,
   people,
   onShotsChanged,
   onVideoProgress,
 }: {
   stillImage: StillImage;
-  projectName: string;
+  project: Project;
+  /** 並びの先頭のシーンか（前のシーンからの切り替えが無い）。 */
+  isFirstScene: boolean;
+  /** シーンの設定（前のシーンからの切り替え）を変えたとき。 */
+  onSceneChanged: () => Promise<void>;
   /** この静止画に写っている人物（セリフの話す人の候補）。 */
   people: ScenePerson[];
   /** カットを読み直したとき。一覧の行に出すカットと動画の数を、そろえてもらう。 */
@@ -5066,6 +5072,7 @@ function SceneCutsCard({
   /** 動画生成の進み具合（生成していないときは null）。閉じている間も一覧の行に出すために知らせる。 */
   onVideoProgress: (stillImageId: string, progress: number | null) => void;
 }) {
+  const projectName = project.name;
   const [shots, setShots] = useState<api.Shot[]>([]);
   // 追加したばかりのカット。その動きの指示の欄へ移って、続けて書けるようにする。
   const [addedShotId, setAddedShotId] = useState<string | null>(null);
@@ -5174,8 +5181,85 @@ function SceneCutsCard({
           people={people}
         />
       ))}
+      <SceneTransitionField
+        stillImage={stillImage}
+        project={project}
+        isFirstScene={isFirstScene}
+        onChanged={onSceneChanged}
+        setError={setError}
+      />
       {deletion.dialog}
       {lightbox.node}
+    </div>
+  );
+}
+
+/** 書き出しで、前のシーンからこのシーンへ切り替わるときの効果。作品の設定を上書きできる。 */
+function SceneTransitionField({
+  stillImage,
+  project,
+  isFirstScene,
+  onChanged,
+  setError,
+}: {
+  stillImage: StillImage;
+  project: Project;
+  isFirstScene: boolean;
+  onChanged: () => Promise<void>;
+  setError: (message: string | null) => void;
+}) {
+  const save = (input: Parameters<typeof api.updateStillImage>[1]) =>
+    void (async () => {
+      setError(null);
+      try {
+        await api.updateStillImage(stillImage.id, input);
+        await onChanged();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  return (
+    <div className="vs-field" style={{ marginTop: 16, maxWidth: 420 }}>
+      <label>前のシーンからの切り替え（書き出し）</label>
+      {isFirstScene ? (
+        <div className="vs-muted">並びの先頭のシーンなので、前のシーンとの切り替えはありません。</div>
+      ) : (
+        <>
+          <select
+            className="vs-select"
+            value={stillImage.scene_transition}
+            onChange={(e) => save({ scene_transition: e.target.value as api.SceneTransitionChoice })}
+          >
+            <option value="project">
+              作品の設定に従う（{describeTransition(project.scene_transition, project.scene_transition_seconds)}）
+            </option>
+            {(Object.keys(SCENE_TRANSITION_LABELS) as api.SceneTransition[]).map((kind) => (
+              <option key={kind} value={kind}>{SCENE_TRANSITION_LABELS[kind]}</option>
+            ))}
+          </select>
+          {stillImage.scene_transition === "fade" && (
+            <div className="vs-row" style={{ gap: 8, marginTop: 6, alignItems: "center" }}>
+              <TransitionSecondsInput
+                value={stillImage.scene_transition_seconds ?? project.scene_transition_seconds}
+                onCommit={(seconds) => save({ scene_transition_seconds: seconds })}
+              />
+              <span className="vs-muted">秒</span>
+              {stillImage.scene_transition_seconds !== null && (
+                <button
+                  className="vs-btn ghost"
+                  onClick={() => save({ scene_transition_seconds: null })}
+                >
+                  作品の長さ（{project.scene_transition_seconds}秒）に戻す
+                </button>
+              )}
+            </div>
+          )}
+          <div className="vs-muted">
+            1本の動画に書き出すとき、前のシーンからこのシーンへ移るところにかけます。
+            作品全体の設定は「書き出し」の画面で変えられます。
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -5210,7 +5294,8 @@ function SceneStatus({ stillImage, progress }: { stillImage: StillImage; progres
  *
  * 静止画の画面と同じく、1行に1シーンで並べ、開くのは1つだけにする。
  */
-function ScenesTab({ projectId, projectName }: { projectId: string; projectName: string }) {
+function ScenesTab({ project }: { project: Project }) {
+  const projectId = project.id;
   const [stillImages, setStillImages] = useState<StillImage[]>([]);
   // セリフの話す人を名前で選べるようにする。
   const [characters, setCharacters] = useState<api.Character[]>([]);
@@ -5271,8 +5356,12 @@ function ScenesTab({ projectId, projectName }: { projectId: string; projectName:
       )}
 
       <div className="vs-fold-list">
-        {stillImages.map((stillImage) => {
+        {stillImages.map((stillImage, index) => {
           const names = characterNames(stillImage, characters);
+          // 並びの先頭のシーンには前のシーンが無いので、切り替えも無い。
+          const transition = index > 0 ? effectiveSceneTransition(stillImage, project) : null;
+          const transitionMeta =
+            transition?.kind === "fade" ? ` ／ 前のシーンから暗転 ${transition.seconds}秒` : "";
           return (
             <FoldRow
               key={stillImage.id}
@@ -5282,13 +5371,15 @@ function ScenesTab({ projectId, projectName }: { projectId: string; projectName:
               onToggle={() => fold.toggle(stillImage.id)}
               thumbnailSrc={stillImage.has_image ? api.stillImageSrc(stillImage) : null}
               title={`#${stillImage.ordinal} ${stillImage.name || "（無題）"}`}
-              meta={`カット ${stillImage.shot_count}件 ／ 人物: ${names || "なし"}`}
+              meta={`カット ${stillImage.shot_count}件 ／ 人物: ${names || "なし"}${transitionMeta}`}
               status={<SceneStatus stillImage={stillImage} progress={generating[stillImage.id]} />}
             >
               {fold.isMounted(stillImage.id) && (
                 <SceneCutsCard
                   stillImage={stillImage}
-                  projectName={projectName}
+                  project={project}
+                  isFirstScene={index === 0}
+                  onSceneChanged={reload}
                   people={stillImage.character_ids.flatMap((id) => {
                     const person = characters.find((character) => character.id === id);
                     return person ? [{ id: person.id, name: person.name }] : [];
@@ -5308,7 +5399,74 @@ function ScenesTab({ projectId, projectName }: { projectId: string; projectName:
 
 // ============================ 書き出し ============================
 
-function ExportTab({ projectId, projectName }: { projectId: string; projectName: string }) {
+const SCENE_TRANSITION_LABELS: Record<api.SceneTransition, string> = {
+  none: "そのままつなぐ",
+  fade: "暗転（フェードアウト・フェードイン）",
+};
+
+/** 切り替えの効果を短く言う（「作品の設定に従う」の選択肢と、シーンの行に出す）。 */
+function describeTransition(kind: api.SceneTransition, seconds: number): string {
+  return kind === "fade" ? `暗転 ${seconds}秒` : "そのままつなぐ";
+}
+
+/** シーンが前のシーンから実際にどう切り替わるか（「作品の設定に従う」を解いたもの）。 */
+function effectiveSceneTransition(
+  stillImage: StillImage,
+  project: Project,
+): { kind: api.SceneTransition; seconds: number } {
+  const kind = stillImage.scene_transition === "project" ? project.scene_transition : stillImage.scene_transition;
+  return { kind, seconds: stillImage.scene_transition_seconds ?? project.scene_transition_seconds };
+}
+
+/**
+ * 暗転の秒数の欄。打っている途中の値では保存せず、欄を離れたときに範囲内なら保存する。
+ * 範囲の外や空のまま離れたら、保存済みの値へ戻す。
+ */
+function TransitionSecondsInput({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (seconds: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  return (
+    <input
+      className="vs-input"
+      style={{ width: 88 }}
+      type="number"
+      min={api.SCENE_TRANSITION_SECONDS_MIN}
+      max={api.SCENE_TRANSITION_SECONDS_MAX}
+      step={0.1}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => {
+        const seconds = Math.round(Number(text) * 10) / 10;
+        const valid =
+          text.trim() !== "" &&
+          Number.isFinite(seconds) &&
+          seconds >= api.SCENE_TRANSITION_SECONDS_MIN &&
+          seconds <= api.SCENE_TRANSITION_SECONDS_MAX;
+        if (!valid || seconds === value) {
+          setText(String(value));
+          return;
+        }
+        onCommit(seconds);
+      }}
+    />
+  );
+}
+
+function ExportTab({
+  project,
+  onProjectChanged,
+}: {
+  project: Project;
+  onProjectChanged: (updated: Project) => void;
+}) {
+  const projectId = project.id;
+  const projectName = project.name;
   const [status, setStatus] = useState<api.ExportStatus | null>(null);
   const [result, setResult] = useState<{ shot_count: number; audio_included: boolean; fps: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -5337,6 +5495,17 @@ function ExportTab({ projectId, projectName }: { projectId: string; projectName:
   useEffect(() => {
     void reloadStatus();
   }, [reloadStatus]);
+
+  /** シーンの切り替えの設定を作品に保存する。書き出しのたびに、保存した設定で暗転をかける。 */
+  const saveTransition = (input: Parameters<typeof api.updateProject>[1]) =>
+    void (async () => {
+      setError(null);
+      try {
+        onProjectChanged(await api.updateProject(projectId, input));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
 
   /** 書き出した動画を保存する。名前は後から見て分かる形にし、保存先は選べるようにする。 */
   const saveExported = () =>
@@ -5416,6 +5585,41 @@ function ExportTab({ projectId, projectName }: { projectId: string; projectName:
             </div>
           )}
         </div>
+        <div className="vs-field" style={{ marginTop: 12, maxWidth: 360 }}>
+          <label>シーンの切り替え</label>
+          <select
+            className="vs-select"
+            value={project.scene_transition}
+            onChange={(e) => saveTransition({ scene_transition: e.target.value as api.SceneTransition })}
+          >
+            {(Object.keys(SCENE_TRANSITION_LABELS) as api.SceneTransition[]).map((kind) => (
+              <option key={kind} value={kind}>{SCENE_TRANSITION_LABELS[kind]}</option>
+            ))}
+          </select>
+          <div className="vs-muted">
+            シーンが変わるところだけにかけます。同じシーンの中のカットのつなぎ目には入りません。
+            シーンごとに変えたいときは、「シーン・カット」の画面でそのシーンを開いて選べます。
+          </div>
+        </div>
+        <div className="vs-field" style={{ marginTop: 12 }}>
+          <label>暗転の長さ（秒）</label>
+          <TransitionSecondsInput
+            value={project.scene_transition_seconds}
+            onCommit={(seconds) => saveTransition({ scene_transition_seconds: seconds })}
+          />
+          <div className="vs-muted">
+            暗くなるまでと、明るくなるまでのそれぞれの長さです（{api.SCENE_TRANSITION_SECONDS_MIN}〜
+            {api.SCENE_TRANSITION_SECONDS_MAX}秒）。長さを決めていないシーンは、この長さになります。
+          </div>
+        </div>
+        <label style={{ cursor: "pointer", display: "block", marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={project.scene_transition_edges}
+            onChange={(e) => saveTransition({ scene_transition_edges: e.target.checked })}
+          />{" "}
+          動画の始まりと終わりも暗転にする
+        </label>
         <div className="vs-row" style={{ marginTop: 12 }}>
           <button
             className="vs-btn"
@@ -5448,7 +5652,7 @@ function ExportTab({ projectId, projectName }: { projectId: string; projectName:
         {exported?.exists && !result && (
           <div className="vs-muted" style={{ marginTop: 8 }}>
             書き出した動画があります（{formatBytes(exported.size_bytes)}）。
-            カットを作り直したときは、書き出し直してください。
+            カットを作り直したときや、シーンの切り替えを変えたときは、書き出し直してください。
           </div>
         )}
         {/* 音が入るのは全カットが音声付き（MiniMax H3）のときだけ。 */}
@@ -5561,15 +5765,24 @@ function MaterialsWorkspace({ projectId, hidden }: { projectId: string; hidden: 
   );
 }
 
-function ProjectWorkspace({ project, tab }: { project: Project; tab: Tab }) {
+function ProjectWorkspace({
+  project,
+  tab,
+  onProjectChanged,
+}: {
+  project: Project;
+  tab: Tab;
+  /** 作業の画面で作品の設定を変えたとき。 */
+  onProjectChanged: (updated: Project) => void;
+}) {
   return (
     <div>
       {/* 素材作成は、ほかの画面を開いている間も描いたままにする。静止画を見に行って
           戻っても、生成の進み具合と入力中の内容がそのまま残る。 */}
       <MaterialsWorkspace projectId={project.id} hidden={tab !== "materials"} />
       {tab === "stillImages" && <StillImagesTab projectId={project.id} projectName={project.name} />}
-      {tab === "scenes" && <ScenesTab projectId={project.id} projectName={project.name} />}
-      {tab === "export" && <ExportTab projectId={project.id} projectName={project.name} />}
+      {tab === "scenes" && <ScenesTab project={project} />}
+      {tab === "export" && <ExportTab project={project} onProjectChanged={onProjectChanged} />}
     </div>
   );
 }
@@ -5662,6 +5875,9 @@ export function App() {
         });
         setProjects((list) => list.map((p) => (p.id === updated.id ? updated : p)));
         setSelected(updated);
+        // 保存した値（前後の空白を除いたもの）を欄に出し直す。
+        setName(updated.name);
+        setStyle(updated.illustration_style);
       } else {
         const created = await api.createProject({
           name: trimmedName,
@@ -5685,11 +5901,23 @@ export function App() {
     if (setupCompleted) void reload();
   }, [setupCompleted, reload]);
 
+  // 欄へ読み込んだ作品。同じ作品のほかの設定（書き出しの切り替え効果など）が変わった
+  // だけなら、編集中の作品名と画風を保存済みの値へ戻さない。
+  const loadedProjectId = useRef<string | null>(null);
   useEffect(() => {
+    if (selected) window.localStorage.setItem(LAST_PROJECT_KEY, selected.id);
+    const id = selected?.id ?? null;
+    if (id === loadedProjectId.current) return;
+    loadedProjectId.current = id;
     setName(selected?.name ?? "");
     setStyle(selected?.illustration_style ?? "");
-    if (selected) window.localStorage.setItem(LAST_PROJECT_KEY, selected.id);
   }, [selected]);
+
+  /** 作業の画面で変えた作品の設定を、一覧と選択中の作品へ反映する。 */
+  const applyProjectChange = useCallback((updated: Project) => {
+    setProjects((list) => list.map((p) => (p.id === updated.id ? updated : p)));
+    setSelected(updated);
+  }, []);
 
   // 作品が無ければ、まず作品を作るところから始めてもらう。
   useEffect(() => {
@@ -5909,7 +6137,12 @@ export function App() {
           {/* 作品を開いている間は、「作品」画面にいても作業の画面を描いたままにする
               （素材作成の進み具合を残すため）。作品を切り替えたら作り直す。 */}
           {selected ? (
-            <ProjectWorkspace key={selected.id} project={selected} tab={tab} />
+            <ProjectWorkspace
+              key={selected.id}
+              project={selected}
+              tab={tab}
+              onProjectChanged={applyProjectChange}
+            />
           ) : (
             tab !== "project" && (
               <div className="vs-card vs-muted">まず「作品」で作品を作成してください。</div>

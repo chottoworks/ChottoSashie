@@ -60,6 +60,8 @@ def _to_still_image(row: Row) -> StillImageRead:
         image_version=str(row["image_revision"]),
         composition_method=row["composition_method"],
         source_prompt=row["source_prompt"],
+        scene_transition=row["scene_transition"],
+        scene_transition_seconds=row["scene_transition_seconds"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -216,6 +218,13 @@ class StillImageRepository:
                 columns["character_ids_json"] = json.dumps(updates["character_ids"], ensure_ascii=False)
             if updates.get("composition_method") is not None:
                 columns["composition_method"] = str(updates["composition_method"])
+            if updates.get("scene_transition") is not None:
+                columns["scene_transition"] = updates["scene_transition"]
+            # 秒数は null で「作品の秒数に従う」へ戻せる。
+            if "scene_transition_seconds" in updates:
+                columns["scene_transition_seconds"] = updates["scene_transition_seconds"]
+            if not columns:
+                return current
             assignments = ", ".join(f"{name} = ?" for name in columns)
             cursor = connection.execute(
                 f"UPDATE still_images SET {assignments}, updated_at = ? WHERE id = ?",

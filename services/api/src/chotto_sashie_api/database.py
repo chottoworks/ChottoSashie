@@ -17,7 +17,7 @@ from .translation import TRANSLATION_TABLE_DDL
 
 # DBの形の版。下の SCHEMA は常に最新の形を書き、新しく作るDBはこの版から始まる。
 # 形を変えるときは版を1つ上げ、前の版のDBを追いつかせる手順を `_MIGRATIONS` に足す。
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS projects (
     description TEXT NOT NULL DEFAULT '',
     -- 作品全体の画風。人物候補・立ち絵・背景・小物・静止画の生成に効かせる。
     illustration_style TEXT NOT NULL DEFAULT '',
+    -- 書き出しで、シーンの切り替わりにかける効果（none=そのままつなぐ / fade=暗転）と、
+    -- 暗くなるまで・明るくなるまでのそれぞれの秒数。シーンごとに上書きできる。
+    scene_transition TEXT NOT NULL DEFAULT 'none'
+        CHECK (scene_transition IN ('none', 'fade')),
+    scene_transition_seconds REAL NOT NULL DEFAULT 0.5,
+    -- 動画の始まりと終わりも暗転にするか（始まりは黒から明るく、終わりは黒へ）。
+    scene_transition_edges INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -162,6 +169,11 @@ CREATE TABLE IF NOT EXISTS still_images (
         CHECK (composition_method IN ('placed', 'text')),
     -- 今の画像を合成するときに ComfyUI へ渡した指示文。画像と一緒に書く。空なら記録が無い。
     source_prompt TEXT NOT NULL DEFAULT '',
+    -- 書き出しで、前のシーンからこのシーンへ切り替わるときの効果。project=作品の設定に従う。
+    -- 秒数が NULL なら作品の秒数を使う。並びの先頭のシーンには前が無いので使わない。
+    scene_transition TEXT NOT NULL DEFAULT 'project'
+        CHECK (scene_transition IN ('project', 'none', 'fade')),
+    scene_transition_seconds REAL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(project_id, ordinal)
@@ -359,6 +371,25 @@ def _add_composition_prompts(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE still_image_characters ADD COLUMN pose_prompt TEXT")
 
 
+def _add_scene_transitions(connection: sqlite3.Connection) -> None:
+    """書き出しでシーンの切り替わりにかける効果の列を、作品と静止画（シーン）に足す。
+
+    前の版の作品は、これまでどおりそのままつなぐ。シーンは作品の設定に従う。
+    """
+    for definition in (
+        "scene_transition TEXT NOT NULL DEFAULT 'none' CHECK (scene_transition IN ('none', 'fade'))",
+        "scene_transition_seconds REAL NOT NULL DEFAULT 0.5",
+        "scene_transition_edges INTEGER NOT NULL DEFAULT 0",
+    ):
+        connection.execute(f"ALTER TABLE projects ADD COLUMN {definition}")
+    for definition in (
+        "scene_transition TEXT NOT NULL DEFAULT 'project' "
+        "CHECK (scene_transition IN ('project', 'none', 'fade'))",
+        "scene_transition_seconds REAL",
+    ):
+        connection.execute(f"ALTER TABLE still_images ADD COLUMN {definition}")
+
+
 # 版ごとの移行手順。キーの版へ上げるために、1つ前の版のDBへ行う変更。
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _add_portrait_crop,
@@ -366,6 +397,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     4: _add_image_revisions,
     5: _add_placed_composition,
     6: _add_composition_prompts,
+    7: _add_scene_transitions,
 }
 
 
