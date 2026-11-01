@@ -233,7 +233,7 @@ GPUのVRAMと世代、ホストRAMの量で、現実的に使えるモデルと�
 
 | 工程 | モデル | ワークフロー | 入力 |
 |---|---|---|---|
-| 人物候補 | Z-Image-Turbo | `z_image/zimage_candidate_core.json` | 文だけ |
+| 人物候補 | Z-Image（ベース） | `z_image/zimage_candidate_core.json` | 文だけ |
 | 背景・小物 | Z-Image-Turbo | `z_image/zimage_basic_core.json` | 文だけ |
 | 立ち絵（基準画像から） | Qwen-Image-Edit-2511＋角度LoRA | `z_image/qwen_character_reference_2511_angles_external.json` | 基準画像1枚 |
 | 立ち絵の変更 | Qwen-Image-Edit-2511 | `composition/qwen_scene_composition.json` | 立ち絵1＋小物0〜2 |
@@ -242,6 +242,8 @@ GPUのVRAMと世代、ホストRAMの量で、現実的に使えるモデルと�
 | 静止画の合成（置いて合成：姿づくり） | Qwen-Image-Edit-2511＋BiRefNet | 同上＋`composition/background_removal.json` | 立ち絵1 |
 | 静止画の合成（置いて合成：なじませ） | Qwen-Image-Edit-2511 | `composition/qwen_scene_composition.json` | 下書き1 |
 | 静止画の合成（指示文で合成） | Qwen-Image-Edit-2511 | 同上 | 立ち絵1〜2＋背景1 |
+
+人物候補と背景・小物は同じ Z-Image の系統でも、別のモデルを使う。人物候補は変化強度を cfg として効かせ（2.0〜3.5）、ネガティブプロンプトで「どこかで見た顔」を遠ざけて、候補ごとの差を出す。Turbo は cfg 1.0 で回す前提に蒸留されていて、cfg 1.0 では CFG が働かずどちらも効かないため、蒸留していないベースモデル（`z_image_bf16`）を24ステップで回す。背景・小物は1枚を速く作り直せることを優先し、Turbo を使う。どちらのモデルも、要件（`video-requirements.json`）と取得（`video-models.json`）の両方に載せる。コードが既定として名指しするモデルが両方に載っていることは、試験で突き合わせる。
 
 立ち絵の変更・背景のバリエーション（まとめて「派生」）と合成は同じテンプレートを使い、**指示文の組み立てだけを分ける**（`derivation.py` と `composition.py`）。テンプレートを写して分岐させると、同じ指定から違う文が出る。
 

@@ -1,3 +1,5 @@
+import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -105,6 +107,47 @@ def test_check_requirements_all_present(tmp_path: Path) -> None:
     )
     assert report.ready is True
     assert all(capability.ready for capability in report.capabilities)
+
+
+def _required_model_files() -> set[str]:
+    manifest = load_requirements(Path("model-manifests/video-requirements.json"))
+    return {
+        model["file"] for capability in manifest["capabilities"] for model in capability["models"]
+    }
+
+
+def test_every_model_the_code_names_is_checked() -> None:
+    """コードが既定として名指しするモデルは、どれも「ノードとモデルの確認」に載っている。
+
+    載っていないと、確認が揃っていると言ったまま、その生成だけがComfyUIで失敗する。
+    手元に別のモデルフォルダがある端末では気づけないので、文字列で突き合わせる。
+    ワークフローのテンプレートに書いたファイル名は、生成のたびに既定で差し替えるため見ない。
+    """
+    named: set[str] = set()
+    for source in Path("services").glob("*/src/**/*.py"):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value.endswith(".safetensors")
+                and not node.value.startswith(".")  # 拡張子だけの文字列はファイル名ではない
+            ):
+                named.add(node.value)
+
+    assert named, "既定のモデル名を1つも見つけられない（探し方が古い）"
+    assert named - _required_model_files() == set()
+
+
+def test_every_checked_model_can_be_fetched() -> None:
+    """「ノードとモデルの確認」で足りないと言うモデルは、どれもアプリが取得できる。"""
+    downloadable = {
+        Path(component["destination"]).name
+        for component in json.loads(
+            Path("model-manifests/video-models.json").read_text(encoding="utf-8")
+        )["components"]
+    }
+
+    assert _required_model_files() - downloadable == set()
 
 
 def test_a_tool_that_cannot_be_checked_is_not_called_ready() -> None:

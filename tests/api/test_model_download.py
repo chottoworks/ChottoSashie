@@ -78,9 +78,10 @@ def _tiny_manifest(tmp_path: Path, *, size: int = 3) -> Path:
 
 def test_real_manifest_plan_reports_all_missing(client: TestClient) -> None:
     body = client.get("/api/v1/setup/models/plan").json()
-    # Wan/Qwen系10件 + 合成で人物を切り抜く BiRefNet 1件 + Z-Image系4件（背景・小物と
-    # 人物候補・立ち絵）+ 任意のMiniMax H3 5件と、その指示を英語へ直す Gemma 1件。
-    assert len(body["components"]) == 21
+    # Wan/Qwen系10件 + 合成で人物を切り抜く BiRefNet 1件 + Z-Image系5件（背景・小物の
+    # Turbo、人物候補のベース、共通のテキストエンコーダーとVAE、立ち絵の角度LoRA）
+    # + 任意のMiniMax H3 5件と、その指示を英語へ直す Gemma 1件。
+    assert len(body["components"]) == 22
     assert all(component["state"] == "missing" for component in body["components"])
     assert body["required_download_bytes"] > 0
 

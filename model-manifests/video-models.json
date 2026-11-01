@@ -147,7 +147,7 @@
     },
     {
       "id": "z-image-turbo-diffusion",
-      "display_name_ja": "Z-Image-Turbo 生成モデル",
+      "display_name_ja": "Z-Image-Turbo 生成モデル（背景・小物）",
       "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/4895ae2dfb1431b12904ae792c7ec0a1770b6f55/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
       "destination": "models/diffusion_models/z_image_turbo_bf16.safetensors",
       "size_bytes": 12309866400,
@@ -155,6 +155,18 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/z_image_turbo",
       "external_read_only_reuse": true
+    },
+    {
+      "id": "z-image-base-diffusion",
+      "display_name_ja": "Z-Image 生成モデル（人物候補）",
+      "download_url": "https://huggingface.co/Comfy-Org/Z-Image/resolve/94d47a468ec820d29a5dc09d4642539d76d49542/split_files/diffusion_models/z_image_bf16.safetensors",
+      "destination": "models/diffusion_models/z_image_bf16.safetensors",
+      "size_bytes": 12309866400,
+      "sha256": "996a67d3ff666946b1c25cbc16d1b1918b6cc0ac166309e23fe3b3d830263dee",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/Comfy-Org/Z-Image",
+      "external_read_only_reuse": true,
+      "note_ja": "蒸留していないベースモデル。人物候補は変化強度を cfg として効かせるため、cfg 1.0 前提の Turbo では作れない。"
     },
     {
       "id": "qwen-3-4b-text-encoder",

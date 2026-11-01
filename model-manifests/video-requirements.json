@@ -18,7 +18,7 @@
       "models": [
         {
           "file": "z_image_turbo_bf16.safetensors",
-          "display_name_ja": "Z-Image-Turbo 生成モデル",
+          "display_name_ja": "Z-Image-Turbo 生成モデル（背景・小物）",
           "loader": "UNETLoader",
           "input": "unet_name"
         },
@@ -231,8 +231,8 @@
         {
           "loader": "UNETLoader",
           "input": "unet_name",
-          "file": "z_image_turbo_bf16.safetensors",
-          "display_name_ja": "Z-Image-Turbo 拡散モデル（人物候補の生成に使用）"
+          "file": "z_image_bf16.safetensors",
+          "display_name_ja": "Z-Image 生成モデル（人物候補の生成に使用）"
         },
         {
           "loader": "CLIPLoader",
