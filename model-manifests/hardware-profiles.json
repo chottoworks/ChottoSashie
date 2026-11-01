@@ -1,8 +1,8 @@
 {
   "format_version": 1,
-  "description": "この端末の構成（VRAM・世代・ホストRAM）から、既定にする生成方法と枚数を決めるための表。tiers はVRAMの多い順に並べ、最初に条件を満たしたものを採る。各設定の選択肢には満たすべき条件を書き、満たさないときは fallback をたどる。ここに書く値は、いま使っているモデル一式（Qwen-Image-Edit-2511 fp8mixed / Z-Image / Wan 2.2 I2V 14B fp8 / MiniMax H3）が要求する実サイズを根拠にしている。",
+  "description": "この端末の構成（VRAM・世代・ホストRAM）から、既定にする生成方法と枚数を決めるための表。tiers はVRAMの多い順に並べ、最初に条件を満たしたものを採る。各設定の選択肢には満たすべき条件を書き、満たさないときは fallback をたどる。ここに書く値は、いま使っているモデル一式（Qwen-Image-Edit-2511 int8 / Z-Image / Wan 2.2 I2V 14B fp8 / MiniMax H3）が要求する実サイズを根拠にしている。",
   "requirements": {
-    "description": "このアプリを実用的に使える下限と、余裕のある構成。合成に使う Qwen-Image-Edit-2511（fp8mixed・約20.5GB）とテキストエンコーダー（約9.4GB）がどれだけVRAMへ載るかで待ち時間が桁違いになるため、そこを基準に決めている。下限未満でも動かないわけではないが、1枚に数分以上かかり、実用にならない。",
+    "description": "このアプリを実用的に使える下限と、余裕のある構成。合成に使う Qwen-Image-Edit-2511（int8・約20.5GB）とテキストエンコーダー（約9.4GB）がどれだけVRAMへ載るかで待ち時間が桁違いになるため、そこを基準に決めている。下限未満でも動かないわけではないが、1枚に数分以上かかり、実用にならない。",
     "minimum": {
       "vram_gb": 12,
       "ram_gb": 32,
@@ -27,7 +27,8 @@
       "settings": {
         "composition_quality": "careful",
         "video_engine": "minimax_h3",
-        "candidate_count": "12"
+        "candidate_count": "12",
+        "candidate_precision": "bf16"
       }
     },
     {
@@ -38,7 +39,8 @@
       "settings": {
         "composition_quality": "fast",
         "video_engine": "wan22",
-        "candidate_count": "10"
+        "candidate_count": "10",
+        "candidate_precision": "bf16"
       }
     },
     {
@@ -49,7 +51,8 @@
       "settings": {
         "composition_quality": "fast",
         "video_engine": "wan22",
-        "candidate_count": "8"
+        "candidate_count": "8",
+        "candidate_precision": "int8"
       }
     },
     {
@@ -60,7 +63,8 @@
       "settings": {
         "composition_quality": "fast",
         "video_engine": "wan22",
-        "candidate_count": "8"
+        "candidate_count": "8",
+        "candidate_precision": "int8"
       }
     }
   ],
@@ -94,15 +98,31 @@
           "reason_ja": "VRAMと世代の条件を満たしているため、映像と音声を一緒に作れるH3を既定にします。",
           "min_vram_gb": 24,
           "min_ram_gb": 32,
-          "min_compute_capability": 12.0,
+          "min_compute_capability": 8.9,
           "fallback": "wan22",
-          "unmet_note_ja": "MiniMax H3 はテキストエンコーダーがnvfp4版（重みを4ビットまで落とした形式）のため、VRAM 24GB以上かつBlackwell世代（RTX 50xx以降）が要ります。モデルの取得も約44GBあります。",
-          "extra_note_ja": "H3のモデル一式（約44GB）は既定では取得しません。セットアップの「モデルの準備」から追加してください。"
+          "unmet_note_ja": "MiniMax H3 はVRAM 24GB以上かつRTX 40xx以降が要ります。テキストエンコーダーがnvfp4版（重みを4ビットまで落とした形式）で、RTX 50xxより前のGPUではComfyUIが重みを展開して計算するためです。RTX 40xxで動くことは確かめていますが、RTX 30xx以前では確かめていません。モデルの取得も約51GBあります。",
+          "extra_note_ja": "H3のモデル一式（約51GB）は既定では取得しません。セットアップの「モデルの準備」から追加してください。"
         },
         {
           "value": "wan22",
           "label_ja": "Wan 2.2（映像のみ）",
           "reason_ja": "14Bのfp8モデル（重みを8ビットに落とした版）を高ノイズ・低ノイズの順に1つずつ読むため、この構成でも最後まで通ります。"
+        }
+      ]
+    },
+    {
+      "key": "candidate_precision",
+      "display_name_ja": "人物候補の生成モデル",
+      "options": [
+        {
+          "value": "bf16",
+          "label_ja": "bf16（標準）",
+          "reason_ja": "重みを落とさない形式で作ります。指定の効き方が最も素直です。"
+        },
+        {
+          "value": "int8",
+          "label_ja": "int8（速い）",
+          "reason_ja": "重みを8ビットに落とした版で作り、1枚あたりを速く、VRAMも少なく済ませます。同じ種でも bf16 とは別の絵になり、目つきのような細かな指定の効き方が弱まることがあります。"
         }
       ]
     },
@@ -193,7 +213,7 @@
     {
       "id": "vram_below_composition",
       "max_vram_gb": 12,
-      "message_ja": "静止画の合成に使う Qwen-Image-Edit-2511（fp8mixed＝重みを8ビットに落とした版・約20GB）がVRAMに収まりません。生成のたびにモデルの出し入れが起きるため、1枚に数分以上かかることがあります。"
+      "message_ja": "静止画の合成に使う Qwen-Image-Edit-2511（int8＝重みを8ビットに落とした版・約20GB）がVRAMに収まりません。生成のたびにモデルの出し入れが起きるため、1枚に数分以上かかることがあります。"
     },
     {
       "id": "ram_below_staging",

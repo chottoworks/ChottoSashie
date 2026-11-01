@@ -41,7 +41,7 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
     async def object_info(_self):
         return {
             "UNETLoader": {
-                "input": {"required": {"unet_name": [["qwen_image_edit_2511_fp8mixed.safetensors"]]}}
+                "input": {"required": {"unet_name": [["qwen_image_edit_2511_int8_convrot.safetensors"]]}}
             }
         }
 

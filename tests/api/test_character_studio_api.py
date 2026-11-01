@@ -48,7 +48,7 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         "freed_after": [],
         "models": [
             "z_image_bf16.safetensors",
-            "qwen_image_edit_2511_fp8mixed.safetensors",
+            "qwen_image_edit_2511_int8_convrot.safetensors",
             "qwen_image_edit_2511_bf16.safetensors",
         ],
     }

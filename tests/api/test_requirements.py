@@ -186,13 +186,20 @@ def test_requirements_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPat
         "i2v",
         "i2v_minimax_h3",
         "character_figure",
+        "character_candidate_int8",
         "prompt_translation",
         "export",
     }
-    # MiniMax H3・日本語→英語変換・書き出しは任意なので、全体の判定を左右しない印が付く
-    # （書き出しが無くても、カット1本ずつは保存できる）。
+    # MiniMax H3・日本語→英語変換・書き出し・人物候補の int8 版は任意なので、全体の判定を
+    # 左右しない印が付く（書き出しが無くても、カット1本ずつは保存できる。人物候補は bf16 で
+    # 作れる）。
     optional = {c["id"] for c in body["capabilities"] if c["optional"]}
-    assert optional == {"i2v_minimax_h3", "prompt_translation", "export"}
+    assert optional == {
+        "i2v_minimax_h3",
+        "prompt_translation",
+        "export",
+        "character_candidate_int8",
+    }
 
 
 def test_requirements_endpoint_502_when_comfy_unreachable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

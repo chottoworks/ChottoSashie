@@ -92,7 +92,7 @@ def test_model_plan_drops_video_models_when_disabled(
     remaining = {component["id"] for component in without_video["components"]}
     assert not (video_ids & remaining)
     # 静止画（合成）と人物モデルに使うものは残る。
-    assert "qwen_image_edit_2511_fp8mixed" in remaining
+    assert "qwen_image_edit_2511_int8" in remaining
     assert "qwen-3-4b-text-encoder" in remaining
     # 動画用（数十GB）が外れる分、必要容量も減る。
     assert without_video["required_download_bytes"] < with_video["required_download_bytes"]

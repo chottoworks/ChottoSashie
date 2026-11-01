@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "description": "ちょっと挿絵の専用環境モードで取得するモデル。SHA256とサイズは各Hugging FaceリポジトリのLFSポインタから取得した実値。optional=true のものは既定では取得せず、利用者が選んだときだけ取得する（MiniMax H3 は合計約44GBあるため）。MiniMax H3 のテキストエンコーダーは nvfp4 版で、Blackwell世代(RTX 50xx)以降が前提。それ以前のGPUでは同リポジトリの qwen3vl_32b_minimax_h3_int8_convrot.safetensors を使う。取得先は版（コミット）で固定する。main を指すと、配布元が差し替えた時点でハッシュが合わず取得できなくなる。翻訳用の Gemma 4 E4B は MiniMax H3 の指示を英語へ直すためだけに使うので、H3 と同じ任意の組に入れる。",
+  "description": "ちょっと挿絵の専用環境モードで取得するモデル。SHA256とサイズは各Hugging FaceリポジトリのLFSポインタから取得した実値。optional=true のものは既定では取得せず、利用者が選んだときだけ取得する（MiniMax H3 は合計約51GBあるため）。MiniMax H3 のテキストエンコーダーは nvfp4 版。Blackwell世代(RTX 50xx)より前のGPUでは、ComfyUI が nvfp4 の重みを展開して計算するため、RTX 40xx でも VRAM 24GB に収まって動く。取得先は版（コミット）で固定する。main を指すと、配布元が差し替えた時点でハッシュが合わず取得できなくなる。翻訳用の Gemma 4 E4B は MiniMax H3 の指示を英語へ直すためだけに使うので、H3 と同じ任意の組に入れる。",
   "license_notices": {
     "description": "取得を押す前に見せる利用条件。Apache-2.0 のように制限のないものは出さず、利用者の地域や用途によって使えないことがあるものだけを挙げる。条文は配布元のものが正本で、ここに書くのはその要点。",
     "minimax_h3": {
@@ -67,15 +67,16 @@
       "video_only": true
     },
     {
-      "id": "qwen_image_edit_2511_fp8mixed",
-      "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (fp8mixed)",
-      "download_url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/f68ace85e60b4a02a323e394253731947657b7d2/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
-      "destination": "models/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
-      "size_bytes": 20533762817,
-      "sha256": "c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e",
+      "id": "qwen_image_edit_2511_int8",
+      "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (int8)",
+      "download_url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit/resolve/f68ace85e60b4a02a323e394253731947657b7d2/split_files/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors",
+      "destination": "models/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors",
+      "size_bytes": 20499083824,
+      "sha256": "11b5af5ac601821d73930c84846c9a158e67177356daf927ce1c8d10f3963829",
       "license": "Apache-2.0",
-      "source": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI",
-      "external_read_only_reuse": true
+      "source": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit",
+      "external_read_only_reuse": true,
+      "note_ja": "fp8mixed 版と大きさも出来もほぼ同じで、int8 の計算を使えるぶん1枚あたりが速い。"
     },
     {
       "id": "qwen_2.5_vl_7b_fp8",
@@ -147,13 +148,13 @@
     },
     {
       "id": "z-image-turbo-diffusion",
-      "display_name_ja": "Z-Image-Turbo 生成モデル（背景・小物）",
-      "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/4895ae2dfb1431b12904ae792c7ec0a1770b6f55/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
-      "destination": "models/diffusion_models/z_image_turbo_bf16.safetensors",
-      "size_bytes": 12309866400,
-      "sha256": "2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6",
+      "display_name_ja": "Z-Image-Turbo 生成モデル（背景・小物, int8）",
+      "download_url": "https://huggingface.co/Comfy-Org/Z-Image-Turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+      "destination": "models/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+      "size_bytes": 6201001296,
+      "sha256": "be517ebd47c912a5626a588e1aeea43e6be4a43c0cdcd2b48a2a780d9f358635",
       "license": "Apache-2.0",
-      "source": "https://huggingface.co/Comfy-Org/z_image_turbo",
+      "source": "https://huggingface.co/Comfy-Org/Z-Image-Turbo",
       "external_read_only_reuse": true
     },
     {
@@ -169,15 +170,27 @@
       "note_ja": "蒸留していないベースモデル。人物候補は変化強度を cfg として効かせるため、cfg 1.0 前提の Turbo では作れない。"
     },
     {
+      "id": "z-image-base-int8-diffusion",
+      "display_name_ja": "Z-Image 生成モデル（人物候補, int8）",
+      "download_url": "https://huggingface.co/Comfy-Org/Z-Image/resolve/94d47a468ec820d29a5dc09d4642539d76d49542/split_files/diffusion_models/z_image_int8_convrot.safetensors",
+      "destination": "models/diffusion_models/z_image_int8_convrot.safetensors",
+      "size_bytes": 6201001296,
+      "sha256": "eb2b470694fbd9778f15efd309000ea0091312c018c10a352c120b1da9bf4279",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/Comfy-Org/Z-Image",
+      "external_read_only_reuse": true,
+      "note_ja": "人物候補を int8 で作るときに使う。bf16 版より速くVRAMも少なくて済むが、同じ種でも別の絵になる。"
+    },
+    {
       "id": "qwen-3-4b-text-encoder",
-      "display_name_ja": "Qwen 3 4B テキストエンコーダー",
-      "source": "https://huggingface.co/Comfy-Org/z_image_turbo",
-      "revision": "429cce00bd1829a3dfd6c57c3204772542876215",
-      "filename": "split_files/text_encoders/qwen_3_4b.safetensors",
-      "destination": "models/text_encoders/qwen_3_4b.safetensors",
-      "size_bytes": 8044982048,
-      "sha256": "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
-      "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/429cce00bd1829a3dfd6c57c3204772542876215/split_files/text_encoders/qwen_3_4b.safetensors",
+      "display_name_ja": "Qwen 3 4B テキストエンコーダー (fp8mixed)",
+      "source": "https://huggingface.co/Comfy-Org/Z-Image-Turbo",
+      "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5",
+      "filename": "split_files/text_encoders/qwen_3_4b_fp8_mixed.safetensors",
+      "destination": "models/text_encoders/qwen_3_4b_fp8_mixed.safetensors",
+      "size_bytes": 5631994051,
+      "sha256": "72450b19758172c5a7273cf7de729d1c17e7f434a104a00167624cba94f68f15",
+      "download_url": "https://huggingface.co/Comfy-Org/Z-Image-Turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/text_encoders/qwen_3_4b_fp8_mixed.safetensors",
       "license": "Apache-2.0",
       "required": true,
       "external_read_only_reuse": true
@@ -241,11 +254,11 @@
     },
     {
       "id": "minimax_h3_video_vae",
-      "display_name_ja": "MiniMax H3 映像VAE (fp16)",
-      "download_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/e5eb578a89295337b8ff433a035929ce0279e0b6/vae/minimax_h3_video_vae_fp16.safetensors",
-      "destination": "models/vae/minimax_h3_video_vae_fp16.safetensors",
-      "size_bytes": 5207808496,
-      "sha256": "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+      "display_name_ja": "MiniMax H3 映像VAE (int8)",
+      "download_url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/912b6e38b2092ec4d2e86d24183e0d59ea059d48/vae/minimax_h3_video_vae_int8_convrot.safetensors",
+      "destination": "models/vae/minimax_h3_video_vae_int8_convrot.safetensors",
+      "size_bytes": 2811065184,
+      "sha256": "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e",
       "license": "MiniMax H3 Community License Agreement",
       "source": "https://huggingface.co/Comfy-Org/MiniMax-H3",
       "external_read_only_reuse": true,

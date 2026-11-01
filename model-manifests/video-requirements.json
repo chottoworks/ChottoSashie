@@ -17,13 +17,13 @@
       ],
       "models": [
         {
-          "file": "z_image_turbo_bf16.safetensors",
-          "display_name_ja": "Z-Image-Turbo 生成モデル（背景・小物）",
+          "file": "z_image_turbo_int8_convrot.safetensors",
+          "display_name_ja": "Z-Image-Turbo 生成モデル（背景・小物, int8）",
           "loader": "UNETLoader",
           "input": "unet_name"
         },
         {
-          "file": "qwen_3_4b.safetensors",
+          "file": "qwen_3_4b_fp8_mixed.safetensors",
           "display_name_ja": "Qwen 3 4B テキストエンコーダー",
           "loader": "CLIPLoader",
           "input": "clip_name"
@@ -66,8 +66,8 @@
         {
           "loader": "UNETLoader",
           "input": "unet_name",
-          "file": "qwen_image_edit_2511_fp8mixed.safetensors",
-          "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (fp8mixed)"
+          "file": "qwen_image_edit_2511_int8_convrot.safetensors",
+          "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (int8)"
         },
         {
           "loader": "LoadBackgroundRemovalModel",
@@ -188,7 +188,7 @@
         {
           "loader": "VAELoader",
           "input": "vae_name",
-          "file": "minimax_h3_video_vae_fp16.safetensors",
+          "file": "minimax_h3_video_vae_int8_convrot.safetensors",
           "display_name_ja": "MiniMax H3 映像VAE"
         },
         {
@@ -237,7 +237,7 @@
         {
           "loader": "CLIPLoader",
           "input": "clip_name",
-          "file": "qwen_3_4b.safetensors",
+          "file": "qwen_3_4b_fp8_mixed.safetensors",
           "display_name_ja": "Qwen3-4B テキストエンコーダー（人物候補の生成に使用）"
         },
         {
@@ -249,8 +249,8 @@
         {
           "loader": "UNETLoader",
           "input": "unet_name",
-          "file": "qwen_image_edit_2511_fp8mixed.safetensors",
-          "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (fp8mixed)（立ち絵の生成に使用）"
+          "file": "qwen_image_edit_2511_int8_convrot.safetensors",
+          "display_name_ja": "Qwen-Image-Edit-2511 拡散モデル (int8)（立ち絵の生成に使用）"
         },
         {
           "loader": "CLIPLoader",
@@ -275,6 +275,23 @@
           "input": "lora_name",
           "file": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
           "display_name_ja": "Qwen-Image-Edit-2511 Lightning LoRA（4ステップ高速化）"
+        }
+      ]
+    },
+    {
+      "id": "character_candidate_int8",
+      "display_name_ja": "人物候補の生成（int8 / 任意）",
+      "optional": true,
+      "notes_ja": "人物候補の生成モデルで int8 を選んだときに使う。既定の bf16 だけで人物候補は作れるため、無くても全体の判定は「揃っている」のままにする（optional）。",
+      "nodes": [
+        "UNETLoader"
+      ],
+      "models": [
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "z_image_int8_convrot.safetensors",
+          "display_name_ja": "Z-Image 生成モデル（人物候補, int8）"
         }
       ]
     },

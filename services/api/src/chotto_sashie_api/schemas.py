@@ -225,7 +225,7 @@ class PortraitCropRequest(BaseModel):
 
 # 立ち絵の生成に使うモデル（アプリが取得するもの）。合成と同じ一式に、向きを
 # 作るための角度LoRAを足す。
-DEFAULT_FIGURE_DIFFUSION_MODEL = "qwen_image_edit_2511_fp8mixed.safetensors"
+DEFAULT_FIGURE_DIFFUSION_MODEL = "qwen_image_edit_2511_int8_convrot.safetensors"
 DEFAULT_FIGURE_TEXT_ENCODER = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
 DEFAULT_FIGURE_VAE = "qwen_image_vae.safetensors"
 DEFAULT_FIGURE_ANGLE_LORA = "qwen-image-edit-2511-multiple-angles-lora.safetensors"
@@ -350,8 +350,8 @@ class CharacterFigureJobResult(BaseModel):
 
 
 # 背景・小物の生成に使う Z-Image Turbo モデルの既定名（ワークフローに焼き込み済み）。
-DEFAULT_ASSET_DIFFUSION_MODEL = "z_image_turbo_bf16.safetensors"
-DEFAULT_ASSET_TEXT_ENCODER = "qwen_3_4b.safetensors"
+DEFAULT_ASSET_DIFFUSION_MODEL = "z_image_turbo_int8_convrot.safetensors"
+DEFAULT_ASSET_TEXT_ENCODER = "qwen_3_4b_fp8_mixed.safetensors"
 DEFAULT_ASSET_VAE = "ae.safetensors"
 
 
@@ -437,7 +437,7 @@ class CompositionLimits(BaseModel):
 
 # ワークフローに焼き込んである既定のQwen-Image-Editモデル名。呼び出し側が
 # モデル探索の結果を持っていればそれで上書きし、無ければこの既定で動かす。
-DEFAULT_COMPOSITION_DIFFUSION_MODEL = "qwen_image_edit_2511_fp8mixed.safetensors"
+DEFAULT_COMPOSITION_DIFFUSION_MODEL = "qwen_image_edit_2511_int8_convrot.safetensors"
 DEFAULT_COMPOSITION_TEXT_ENCODER = "qwen_2.5_vl_7b_fp8_scaled.safetensors"
 DEFAULT_COMPOSITION_VAE = "qwen_image_vae.safetensors"
 DEFAULT_COMPOSITION_LIGHTNING_LORA = (
@@ -636,7 +636,7 @@ DEFAULT_WAN_LIGHTNING_LOW = "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safete
 # MiniMax H3（fl2va）に使うモデルの既定名。公式テンプレートと同じ量子化版を使う。
 DEFAULT_H3_DIFFUSION_MODEL = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
 DEFAULT_H3_TEXT_ENCODER = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
-DEFAULT_H3_VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
+DEFAULT_H3_VIDEO_VAE = "minimax_h3_video_vae_int8_convrot.safetensors"
 DEFAULT_H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
 DEFAULT_H3_TURBO_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
 
@@ -885,7 +885,7 @@ class HardwareReport(BaseModel):
     # いま空いているVRAM。ComfyUIから読めたときだけ入る。
     vram_free_bytes: int | None = None
     ram_total_bytes: int = 0
-    # 例: "12.0"（Blackwell）。MiniMax H3 のnvfp4版が動くかの判断に使う。
+    # 例: "12.0"（Blackwell）。MiniMax H3 を勧めてよい世代かの判断に使う。
     compute_capability: str = ""
     driver_version: str = ""
     # 調べられなかったときに、何が起きたかを利用者へ伝える一言。
@@ -972,7 +972,7 @@ class ExportStatus(BaseModel):
 class ModelDownloadRequest(BaseModel):
     """取得するモデルの範囲。既定（空）は必須のモデルだけ。
 
-    任意のまとまり（例: MiniMax H3 は合計約44GB）は、名前を挙げたときだけ取得する。
+    任意のまとまり（例: MiniMax H3 は合計約51GB）は、名前を挙げたときだけ取得する。
     """
 
     groups: list[str] = Field(default_factory=list, max_length=8)

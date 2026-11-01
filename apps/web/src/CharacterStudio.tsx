@@ -69,6 +69,7 @@ export function CharacterStudio({
   const [figures, setFigures] = useState<api.CharacterFigure[]>([]);
   // 枚数・強度は、前回選んだ値から始める（毎回選び直させない）。
   const [candidateCount, setCandidateCount] = useRememberedSetting("candidate_count");
+  const [candidatePrecision, setCandidatePrecision] = useRememberedSetting("candidate_precision");
   const [variationStrength, setVariationStrength] = useRememberedSetting("variation_strength");
   // 作り直したときに前の回をどうするか（設定で選ぶ。既定は上書き）。
   const [candidateHistory] = useRememberedSetting("candidate_history");
@@ -300,6 +301,7 @@ export function CharacterStudio({
       const result = await api.generateCandidates(
         character.id,
         candidateCount,
+        candidatePrecision,
         variationStrength,
         keep,
       );
@@ -790,6 +792,21 @@ export function CharacterStudio({
               {[8, 10, 12].map((value) => (
                 <option key={value} value={value}>{value}</option>
               ))}
+            </select>
+            <label
+              className="vs-muted"
+              title="int8 は1枚あたりが速く、VRAMも少なくて済みます。同じ種でも bf16 とは別の絵になり、目つきのような細かな指定の効き方が弱まることがあります。"
+            >
+              生成モデル
+            </label>
+            <select
+              className="vs-select"
+              style={{ maxWidth: 140 }}
+              value={candidatePrecision}
+              onChange={(e) => setCandidatePrecision(e.target.value as api.CandidatePrecision)}
+            >
+              <option value="bf16">bf16（標準）</option>
+              <option value="int8">int8（速い）</option>
             </select>
             <label className="vs-muted" title="低いと画風に忠実で穏やか、高いと顔立ちと候補ごとの差が強く出ます。">
               変化強度 {variationStrength.toFixed(1)}

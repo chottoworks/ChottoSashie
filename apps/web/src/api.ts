@@ -142,6 +142,8 @@ export interface Preferences {
   composition_quality: "fast" | "careful";
   video_engine: VideoEngine;
   candidate_count: number;
+  /** 人物候補の生成モデルの重みの形式。int8 は速くVRAMも少なくて済むが、同じ種でも別の絵になる。 */
+  candidate_precision: CandidatePrecision;
   variation_strength: number;
   /** 人物候補を作り直したときの前の回。discard は上書き（基準画像だけ残す）、keep は履歴に残す。 */
   candidate_history: "discard" | "keep";
@@ -1418,17 +1420,20 @@ export const updateCharacterProfile = (characterId: string, input: Partial<Chara
     "プロフィールを保存できませんでした",
   );
 
+export type CandidatePrecision = "bf16" | "int8";
+
 /** `keepHistory` を false にすると、生成前にこの人物の候補をすべて削除する（上書き）。 */
 export const generateCandidates = (
   characterId: string,
   count: number,
+  precision: CandidatePrecision,
   variationStrength: number,
   keepHistory: boolean,
 ) =>
   apiSend<{ job: Job; candidates: Candidate[] }>(
     `/api/v1/characters/${characterId}/candidates/generate`,
     "POST",
-    { count, variation_strength: variationStrength, keep_history: keepHistory },
+    { count, precision, variation_strength: variationStrength, keep_history: keepHistory },
     "人物候補の生成を開始できませんでした",
   );
 

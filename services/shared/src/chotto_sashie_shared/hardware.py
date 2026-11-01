@@ -6,9 +6,9 @@
    専用ComfyUIが起動していれば、いま空いているVRAMまで分かる。
 2. **``nvidia-smi``** — ComfyUIがまだ動いていない段階（＝セットアップ中）の代わり。
 
-``nvidia-smi`` からは compute capability も取る。MiniMax H3 のテキストエンコーダー
-（nvfp4）は Blackwell 世代（12.0）以降でしか動かないため、VRAMの量だけでは
-「H3を勧めてよいか」を判断できない。ComfyUI の ``/system_stats`` は世代を返さないので、
+``nvidia-smi`` からは compute capability も取る。MiniMax H3 は動くことを確かめた
+RTX 40xx（8.9）以降にだけ勧めるため、VRAMの量だけでは「H3を勧めてよいか」を
+判断できない。ComfyUI の ``/system_stats`` は世代を返さないので、
 つながる場合でも ``nvidia-smi`` は併せて実行し、数値だけをComfyUI側で上書きする。
 
 どちらも取れない環境（GPU無し・ドライバ未導入・非Windows）でも例外にはしない。

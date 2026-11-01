@@ -64,15 +64,27 @@ def test_reports_gpu_and_recommends_for_large_vram(
     # VRAMも世代も足りているので、音声付きと丁寧な合成を勧める。
     assert _setting(body, "video_engine")["value"] == "minimax_h3"
     assert _setting(body, "composition_quality")["value"] == "careful"
+    # 人物候補は指定の効き方が素直な bf16 のまま。
+    assert _setting(body, "candidate_precision")["value"] == "bf16"
     # まだ適用していないので「おすすめのまま」ではない。
     assert body["applied"] is False
+
+
+def test_ada_generation_gets_minimax_h3(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RTX 40xx では nvfp4 を ComfyUI が展開して計算し、VRAM 24GB で動く。"""
+    _install_probe(monkeypatch, vram_gb=24, capability="8.9")
+    engine = _setting(client.get("/api/v1/setup/hardware").json(), "video_engine")
+
+    assert engine["value"] == "minimax_h3"
 
 
 def test_old_generation_does_not_get_minimax_h3(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """VRAMは足りていても、nvfp4が動かない世代にH3は勧めない。"""
-    _install_probe(monkeypatch, vram_gb=48, capability="8.9")
+    """VRAMは足りていても、動くことを確かめていない世代（RTX 30xx）にH3は勧めない。"""
+    _install_probe(monkeypatch, vram_gb=48, capability="8.6")
     body = client.get("/api/v1/setup/hardware").json()
 
     engine = _setting(body, "video_engine")
@@ -100,6 +112,8 @@ def test_small_vram_gets_light_settings_and_warnings(
     assert body["recommendation"]["tier"] == "minimum"
     assert _setting(body, "composition_quality")["value"] == "fast"
     assert _setting(body, "candidate_count")["value"] == "8"
+    # VRAMの少ない端末では、人物候補も軽い int8 で作る。
+    assert _setting(body, "candidate_precision")["value"] == "int8"
     # 合成モデルが収まらないこと・RAMが細いことは、先に伝える。
     assert len(body["recommendation"]["warnings"]) >= 2
 

@@ -17,6 +17,7 @@ const DEFAULTS: api.Preferences = {
   composition_quality: "fast",
   video_engine: "wan22",
   candidate_count: 8,
+  candidate_precision: "bf16",
   variation_strength: 3.0,
   candidate_history: "discard",
   recommendation_tier: "",

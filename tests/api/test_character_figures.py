@@ -41,7 +41,8 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     submitted: dict[str, list] = {
         "workflows": [],
         "uploads": [],
-        "models": ["qwen_image_edit_2511_fp8mixed.safetensors"],
+        # 人物候補（基準画像を作るため）と立ち絵に使う拡散モデル。
+        "models": ["z_image_bf16.safetensors", "qwen_image_edit_2511_int8_convrot.safetensors"],
     }
 
     async def object_info(_self):

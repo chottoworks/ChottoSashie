@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 CompositionQualityPreference = Literal["fast", "careful"]
 VideoEnginePreference = Literal["wan22", "minimax_h3"]
 CandidateCount = Annotated[int, Field(ge=1, le=24)]
+# 人物候補の生成モデルの重みの形式（bf16 か、速くて軽い int8 か）。
+CandidatePrecisionPreference = Literal["bf16", "int8"]
 # 人物候補の振れ幅。画面のつまみと同じ範囲。
 VariationStrength = Annotated[float, Field(ge=1.0, le=5.0)]
 # 人物候補を作り直したときの前の回。discard は上書き（基準画像だけ残して消す）、
@@ -35,6 +37,7 @@ class PreferencesRead(BaseModel):
     composition_quality: CompositionQualityPreference = "fast"
     video_engine: VideoEnginePreference = "wan22"
     candidate_count: CandidateCount = 8
+    candidate_precision: CandidatePrecisionPreference = "bf16"
     variation_strength: VariationStrength = 3.0
     # 使わなかった画像を溜めない方を既定にする。残したい人だけが切り替える。
     candidate_history: CandidateHistoryPreference = "discard"
@@ -50,6 +53,7 @@ class PreferencesUpdate(BaseModel):
     composition_quality: CompositionQualityPreference | None = None
     video_engine: VideoEnginePreference | None = None
     candidate_count: CandidateCount | None = None
+    candidate_precision: CandidatePrecisionPreference | None = None
     variation_strength: VariationStrength | None = None
     candidate_history: CandidateHistoryPreference | None = None
 

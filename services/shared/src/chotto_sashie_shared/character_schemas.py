@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
@@ -148,6 +149,16 @@ class CharacterRead(CharacterProfileFields):
     updated_at: datetime
 
 
+# 人物候補の生成モデルの重みの形式。bf16 は蒸留していないベースそのもの、int8 はその
+# 量子化版。int8 は1枚あたりが速くVRAMも少なくて済むが、同じ種でも bf16 とは別の絵になり、
+# 細かな指定（目つきなど）の効き方が弱まることがある。
+CandidatePrecision = Literal["bf16", "int8"]
+CANDIDATE_DIFFUSION_MODELS: dict[str, str] = {
+    "bf16": "z_image_bf16.safetensors",
+    "int8": "z_image_int8_convrot.safetensors",
+}
+
+
 class CandidateGenerateRequest(BaseModel):
     # 未指定ならセットアップ設定の接続先を使う。
     base_url: HttpUrl | None = None
@@ -164,9 +175,13 @@ class CandidateGenerateRequest(BaseModel):
     # 変化強度。UIのスライダーに対応し、内部的には生成のcfgを動かす。値が大きいほど
     # 指定と候補ごとの差を強く出すが、上げすぎると戯画化・画風の硬化が起きる。
     variation_strength: float = Field(default=3.0, ge=2.0, le=3.5)
-    diffusion_model: str = "z_image_bf16.safetensors"
-    text_encoder: str = "qwen_3_4b.safetensors"
+    precision: CandidatePrecision = "bf16"
+    text_encoder: str = "qwen_3_4b_fp8_mixed.safetensors"
     vae: str = "ae.safetensors"
+
+    @property
+    def diffusion_model(self) -> str:
+        return CANDIDATE_DIFFUSION_MODELS[self.precision]
 
     @field_validator("base_url")
     @classmethod
