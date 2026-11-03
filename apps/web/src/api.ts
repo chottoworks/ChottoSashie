@@ -149,6 +149,11 @@ export interface Preferences {
   candidate_history: "discard" | "keep";
   /** 最後に適用したおすすめの段。空なら未適用。 */
   recommendation_tier: string;
+  /**
+   * この端末へのおすすめ（使うモデルが変わる項目だけ）。モデルはこの値に合わせて取得する。
+   * 選び直した値と違えば、追加の取得が要ることがある。
+   */
+  recommended: Partial<Record<keyof Preferences, string>>;
   updated_at: string | null;
 }
 
@@ -260,9 +265,9 @@ export interface ManagedRuntimeStatus {
 export interface ModelPlanComponent {
   id: string;
   display_name: string;
-  /** 既定では取得しない任意のモデル。 */
+  /** 今の設定では使わず、既定では取得しないモデル。 */
   optional: boolean;
-  /** まとめて取得するときの単位（例: minimax_h3）。 */
+  /** まとめて取得するときの単位（例: minimax_h3）。誰でも使う本体一式は core。 */
   group: string;
   state: string;
   path: string;
@@ -283,9 +288,24 @@ export interface ModelLicenseNotice {
   consent_ja: string;
   note_ja: string;
 }
+/** 設定の1つの選択肢でだけ使うモデルのまとまり。 */
+export interface ModelPlanGroup {
+  id: string;
+  display_name: string;
+  /** そのまとまりを使う設定と値（例: video_engine と minimax_h3）。 */
+  setting_key: string;
+  setting_value: string;
+  /** 既定で取得するか（いま使う設定、選んでいなければおすすめに当たるか）。 */
+  default: boolean;
+  description: string;
+}
 export interface ModelPlan {
   components: ModelPlanComponent[];
+  /** 既定で取得するもののうち、まだ無いぶん。 */
   required_download_bytes: number;
+  /** 「すべて取得」したときに取得するぶん。 */
+  all_download_bytes: number;
+  groups: ModelPlanGroup[];
   free_bytes: number | null;
   enough_space: boolean;
   message: string;
@@ -504,8 +524,8 @@ export interface Shot {
 export type VideoEngine = "wan22" | "minimax_h3";
 
 export const VIDEO_ENGINES: { id: VideoEngine; label: string; note: string }[] = [
-  { id: "wan22", label: "Wan 2.2（標準）", note: "映像のみ・16fpsで約5秒" },
-  { id: "minimax_h3", label: "MiniMax H3（音声付き）", note: "音声も一緒に生成・24fpsで約5秒。専用モデルの取得が要る" },
+  { id: "wan22", label: "Wan 2.2（映像のみ）", note: "16fpsで約5秒" },
+  { id: "minimax_h3", label: "MiniMax H3（音声付き）", note: "音声も一緒に生成・24fpsで約5秒" },
 ];
 
 export interface Job {
@@ -860,9 +880,13 @@ export const stopRuntime = () =>
 export const getRuntimeStatus = () =>
   apiGet<ManagedRuntimeStatus>("/api/v1/setup/runtime/status", "起動状態を取得できませんでした");
 export const getModelPlan = () => apiGet<ModelPlan>("/api/v1/setup/models/plan", "モデル計画を取得できませんでした");
-/** groups を渡すと、その任意モデル（例: minimax_h3）も併せて取得する。 */
-export const startModelDownload = (groups: string[] = []) =>
-  apiSend<Job>("/api/v1/setup/models/download", "POST", { groups }, "モデル取得を開始できませんでした");
+/** 既定（空）は、本体一式といま使う設定のまとまり。groups でほかのまとまりを、all ですべてを取得する。 */
+export interface ModelDownloadRequest {
+  groups?: string[];
+  all?: boolean;
+}
+export const startModelDownload = (request: ModelDownloadRequest = {}) =>
+  apiSend<Job>("/api/v1/setup/models/download", "POST", request, "モデル取得を開始できませんでした");
 export const getComfyuiStatus = () =>
   apiGet<ComfyUIStatus>("/api/v1/setup/comfyui/status", "ComfyUI準備状況を取得できませんでした");
 /** 必要環境の確認で足りなかった道具を、アプリが用意する（共有フォルダへ置く）。 */

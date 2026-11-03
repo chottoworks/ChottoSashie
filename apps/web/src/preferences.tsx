@@ -21,6 +21,7 @@ const DEFAULTS: api.Preferences = {
   variation_strength: 3.0,
   candidate_history: "discard",
   recommendation_tier: "",
+  recommended: {},
   updated_at: null,
 };
 
@@ -92,4 +93,24 @@ export function useRememberedSetting<K extends keyof api.Preferences>(
     [key, update],
   );
   return [preferences[key], setValue];
+}
+
+/**
+ * 使うモデルが変わる設定で、おすすめ以外を選んでいるときの注意。おすすめどおりなら null。
+ *
+ * モデルはおすすめ（選んだ設定があればその設定）に合わせて取得するため、ほかの選択肢の
+ * モデルは取得していないことがある。生成して初めて気づくことのないよう、選んだ時点で伝える。
+ */
+export function useOffRecommendationNote<K extends keyof api.Preferences>(
+  key: K,
+  labels: Record<string, string>,
+): string | null {
+  const { preferences } = usePreferences();
+  const recommended = preferences.recommended[key];
+  if (recommended === undefined || String(preferences[key]) === recommended) return null;
+  return (
+    `おすすめの「${labels[recommended] ?? recommended}」以外を選んでいます。`
+    + "モデルの追加取得が必要になる場合があります。"
+    + "取得していなければ、セットアップの「モデルの取得」にある「ほかの設定で使うモデル」から取得してください。"
+  );
 }

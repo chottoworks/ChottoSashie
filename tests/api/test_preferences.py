@@ -99,3 +99,36 @@ def test_reset_keeps_remembered_defaults(client: TestClient) -> None:
     client.post("/api/v1/setup/reset")
 
     assert client.get("/api/v1/preferences").json()["video_engine"] == "minimax_h3"
+
+
+def test_unchosen_model_settings_follow_recommendation(client: TestClient, set_hardware) -> None:
+    """使うモデルが変わる設定は、まだ選んでいなければこの端末へのおすすめになる。
+
+    モデルの取得もおすすめに従うので、画面の既定だけが取得していないモデルを指すことがない。
+    """
+    set_hardware(vram_gb=12)
+    body = client.get("/api/v1/preferences").json()
+    assert body["video_engine"] == "wan22"
+    assert body["candidate_precision"] == "int8"
+    assert body["recommended"] == {"video_engine": "wan22", "candidate_precision": "int8"}
+    # 使うモデルが変わらない項目は、おすすめがあっても設定の既定のまま。
+    assert body["candidate_count"] == 8
+
+    set_hardware(vram_gb=32)
+    body = client.get("/api/v1/preferences").json()
+    assert body["video_engine"] == "minimax_h3"
+    assert body["candidate_precision"] == "bf16"
+
+
+def test_chosen_value_wins_over_recommendation(client: TestClient, set_hardware) -> None:
+    set_hardware(vram_gb=32)
+    body = client.put("/api/v1/preferences", json={"video_engine": "wan22"}).json()
+    assert body["video_engine"] == "wan22"
+    # おすすめは選んだ値と別に添える（画面で、おすすめ以外を選んだことを示すため）。
+    assert body["recommended"]["video_engine"] == "minimax_h3"
+    assert client.get("/api/v1/preferences").json()["video_engine"] == "wan22"
+
+
+def test_undetected_hardware_recommends_setting_defaults(client: TestClient) -> None:
+    body = client.get("/api/v1/preferences").json()
+    assert body["recommended"] == {"video_engine": "wan22", "candidate_precision": "bf16"}

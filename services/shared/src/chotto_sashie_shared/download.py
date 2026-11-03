@@ -13,6 +13,8 @@ from .model_layout import models_relative_path
 
 
 CHUNK_SIZE = 8 * 1024 * 1024
+# 設定に関わらず誰でも使う本体一式。常に取得する。
+CORE_GROUP = "core"
 
 
 class DownloadError(RuntimeError):
@@ -30,11 +32,26 @@ class DownloadSpec:
     license: str
     source: str
     external_read_only_reuse: bool = False
-    # 既定では取得しない任意のモデル（特定の機能を使う人だけが取る）。
-    optional: bool = False
-    # 一括で選べるようにするためのまとまり（例: minimax_h3）。既定は本体一式。
-    group: str = "core"
+    # 設定の選択肢でだけ使うモデルのまとまり（例: minimax_h3）。誰でも使う本体一式は core。
+    group: str = CORE_GROUP
     # 動画を作るときだけ必要か。挿絵だけの設定では取得対象から外す。
+    video_only: bool = False
+
+
+@dataclass(frozen=True)
+class DownloadGroup:
+    """設定の1つの選択肢でだけ使うモデルのまとまり。
+
+    その設定で選んでいる値（選んでいなければ、この端末へのおすすめ）に当たるまとまりだけを
+    既定で取得する。ほかの選択肢のモデルまで全員に取得させないため。
+    """
+
+    id: str
+    display_name_ja: str
+    setting_key: str
+    setting_value: str
+    # 画面で、取得するかを決める手がかりにする説明。
+    description_ja: str = ""
     video_only: bool = False
 
 
@@ -74,12 +91,42 @@ def load_download_specs(manifest_path: Path) -> list[DownloadSpec]:
                 license=component["license"],
                 source=component["source"],
                 external_read_only_reuse=component.get("external_read_only_reuse", False),
-                optional=bool(component.get("optional", False)),
-                group=str(component.get("group", "core")),
+                group=str(component.get("group", CORE_GROUP)),
                 video_only=bool(component.get("video_only", False)),
             )
         )
     return specs
+
+
+def load_download_groups(manifest_path: Path) -> list[DownloadGroup]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    groups: list[DownloadGroup] = []
+    for group in manifest.get("groups", []):
+        if not isinstance(group, dict):
+            continue
+        setting = group.get("setting")
+        if not isinstance(setting, dict) or not group.get("id"):
+            continue
+        groups.append(
+            DownloadGroup(
+                id=str(group["id"]),
+                display_name_ja=str(group.get("display_name_ja", group["id"])),
+                setting_key=str(setting.get("key", "")),
+                setting_value=str(setting.get("value", "")),
+                description_ja=str(group.get("description_ja", "")),
+                video_only=bool(group.get("video_only", False)),
+            )
+        )
+    return groups
+
+
+def default_group_ids(groups: list[DownloadGroup], settings: dict[str, str]) -> set[str]:
+    """既定で取得するまとまり。本体一式と、選んでいる設定の値に当たるまとまり。"""
+    selected = {CORE_GROUP}
+    for group in groups:
+        if settings.get(group.setting_key) == group.setting_value:
+            selected.add(group.id)
+    return selected
 
 
 def safe_destination(root: Path, relative_path: str) -> Path:
@@ -196,8 +243,12 @@ def build_setup_plan(
     verify_managed_hashes: bool = False,
     verify_external_hashes: bool = True,
     reserve_bytes: int = 2 * 1024**3,
+    default_groups: set[str] | None = None,
 ) -> dict[str, object]:
     """取得計画を作る。
+
+    `default_groups` は既定で取得するまとまり（省くと本体一式だけ）。それ以外のまとまりは
+    任意（optional）として載せ、「必要な容量」には数えない。
 
     `root` は取得先のモデルフォルダ、`extra_roots` はすでに置いてあるかもしれない
     別のモデルフォルダ（共有フォルダ・既存フォルダ）。`external_files` は
@@ -208,7 +259,9 @@ def build_setup_plan(
     external_candidates = external_files or []
     other_roots = extra_roots or []
     components: list[dict[str, object]] = []
+    selected = default_groups if default_groups is not None else {CORE_GROUP}
     required_bytes = 0
+    all_bytes = 0
 
     for spec in specs:
         status = inspect_managed_file(
@@ -246,14 +299,16 @@ def build_setup_plan(
             resumable_bytes = current_bytes if state == "partial" else 0
             download_bytes = 0 if state == "ready" else spec.size_bytes - resumable_bytes
             message = status.message
+        optional = spec.group not in selected
         # 任意のモデルは、選ばれるまで「必要な容量」に数えない。
-        if not spec.optional:
+        if not optional:
             required_bytes += download_bytes
+        all_bytes += download_bytes
         components.append(
             {
                 "id": spec.id,
                 "display_name": spec.display_name_ja,
-                "optional": spec.optional,
+                "optional": optional,
                 "group": spec.group,
                 "state": state,
                 "path": path,
@@ -278,6 +333,8 @@ def build_setup_plan(
         "managed_root": str(managed_root),
         "components": components,
         "required_download_bytes": required_bytes,
+        # 「すべて取得」したときの量（任意のまとまりも含む）。
+        "all_download_bytes": all_bytes,
         "free_bytes": free_bytes,
         "enough_space": enough_space,
         "reserve_bytes": reserve_bytes,

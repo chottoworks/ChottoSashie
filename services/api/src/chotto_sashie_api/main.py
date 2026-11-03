@@ -43,7 +43,9 @@ from chotto_sashie_shared.download import (
     ensure_free_space,
     find_existing_model,
     find_matching_external_file,
+    default_group_ids,
     inspect_managed_file,
+    load_download_groups,
     load_download_specs,
 )
 from chotto_sashie_shared.ffmpeg_provision import (
@@ -645,7 +647,56 @@ def clear_setup_config() -> SetupConfigRead:
     # 覚えている既定値（前回選んだ生成方法・枚数）も一緒に忘れる。接続先だけ消えて
     # 前の端末向けのおすすめが残っていると、初期化した意味が無くなるため。
     PreferenceRepository(database).clear()
+    _recommended_cache.clear()
     return SetupConfigRepository(database).clear()
+
+
+# この端末へのおすすめ（項目→値）。構成を判定できたときだけ控え、以後は調べ直さない
+# （GPUは動いている間に変わらない。設定を読むたびに nvidia-smi を待たせない）。
+# 「この端末に合う設定を見る」で調べ直したときは、その結果で置き換える。
+_recommended_cache: dict[str, str] = {}
+
+
+def _model_setting_keys() -> set[str]:
+    """使うモデルが変わる設定（取得のまとまりが結び付いている項目）。"""
+    try:
+        groups = load_download_groups(MODELS_MANIFEST_PATH)
+    except (OSError, ValueError):
+        return set()
+    return {group.setting_key for group in groups}
+
+
+async def _recommended_model_settings() -> dict[str, str]:
+    """使うモデルが変わる設定の、この端末へのおすすめ。
+
+    構成を判定できなかった項目は、設定の既定値をおすすめとして扱う。モデルの取得も
+    確認も、利用者が選んでいなければこの値に従う。
+    """
+    if not _recommended_cache:
+        await _hardware_report()
+    keys = _model_setting_keys()
+    values = {
+        key: str(PreferencesRead.model_fields[key].default)
+        for key in keys
+        if key in PreferencesRead.model_fields
+    }
+    values.update({key: value for key, value in _recommended_cache.items() if key in keys})
+    return values
+
+
+async def _effective_preferences() -> PreferencesRead:
+    """選んだ値。使うモデルが変わる設定は、まだ選んでいなければおすすめを使う。"""
+    return PreferenceRepository(database).with_recommended(await _recommended_model_settings())
+
+
+async def _model_settings() -> dict[str, str]:
+    """取得と確認の対象を決める値（使うモデルが変わる設定の、いま使う値）。"""
+    effective = await _effective_preferences()
+    return {
+        key: str(getattr(effective, key))
+        for key in _model_setting_keys()
+        if hasattr(effective, key)
+    }
 
 
 async def _hardware_report(explicit_base_url: str | None = None) -> HardwareReport:
@@ -662,6 +713,11 @@ async def _hardware_report(explicit_base_url: str | None = None) -> HardwareRepo
             status_code=500, detail=f"おすすめの基準表を読み込めません: {error}"
         ) from error
     recommendation = recommend(probe, manifest, video_enabled=config.video_enabled)
+    if probe.detected and recommendation.settings:
+        _recommended_cache.clear()
+        _recommended_cache.update(
+            {setting.key: setting.value for setting in recommendation.settings}
+        )
     current = PreferenceRepository(database).get()
     applied = bool(recommendation.settings) and all(
         str(getattr(current, setting.key, "")) == setting.value
@@ -704,19 +760,24 @@ async def apply_hardware_recommendation() -> PreferencesRead:
         )
     values = {setting.key: setting.value for setting in report.recommendation.settings}
     values["recommendation_tier"] = report.recommendation.tier
-    return PreferenceRepository(database).apply(values)
+    PreferenceRepository(database).apply(values)
+    return await _effective_preferences()
 
 
 @app.get("/api/v1/preferences", response_model=PreferencesRead)
-def get_preferences() -> PreferencesRead:
-    """前回選んだ生成方法・枚数（画面の初期表示に使う）。"""
-    return PreferenceRepository(database).get()
+async def get_preferences() -> PreferencesRead:
+    """前回選んだ生成方法・枚数（画面の初期表示に使う）。
+
+    使うモデルが変わる設定は、まだ選んでいなければこの端末へのおすすめを返す。
+    """
+    return await _effective_preferences()
 
 
 @app.put("/api/v1/preferences", response_model=PreferencesRead)
-def put_preferences(request: PreferencesUpdate) -> PreferencesRead:
+async def put_preferences(request: PreferencesUpdate) -> PreferencesRead:
     """画面で選び直した値を覚える。送らなかった項目は今の値のまま。"""
-    return PreferenceRepository(database).set(request)
+    PreferenceRepository(database).set(request)
+    return await _effective_preferences()
 
 
 @app.get("/api/v1/setup/status", response_model=SetupStatus)
@@ -768,6 +829,8 @@ async def get_setup_requirements(base_url: str | None = Query(default=None)) -> 
         manifest,
         include_video=SetupConfigRepository(database).get().video_enabled,
         tool_status=_local_tool_status,
+        # 取得計画と同じ値で決める（取得するものと確かめるものをそろえる）。
+        settings=await _model_settings(),
     )
 
 
@@ -985,10 +1048,29 @@ def _download_specs_for_setup() -> list:
     return [spec for spec in specs if not spec.video_only]
 
 
+async def _default_download_groups() -> set[str]:
+    """既定で取得するまとまり。本体一式と、いま使う設定の値に当たるまとまり。"""
+    groups = load_download_groups(MODELS_MANIFEST_PATH)
+    return default_group_ids(groups, await _model_settings())
+
+
+def _download_groups_for_setup() -> list:
+    """画面へ出すまとまり。動画を作らない設定では、動画用のまとまりを出さない。"""
+    groups = load_download_groups(MODELS_MANIFEST_PATH)
+    if SetupConfigRepository(database).get().video_enabled:
+        return groups
+    return [group for group in groups if not group.video_only]
+
+
 @app.get("/api/v1/setup/models/plan")
-def get_models_plan() -> dict:
-    """必要なモデルの取得計画（既存/不足/必要容量/取得先）を返す。"""
+async def get_models_plan() -> dict:
+    """必要なモデルの取得計画（既存/不足/必要容量/取得先）を返す。
+
+    既定で取得するのは、本体一式と、いま使う設定（選んでいなければ、この端末への
+    おすすめ）に当たるまとまり。ほかの選択肢のまとまりは任意として載せる。
+    """
     specs = _download_specs_for_setup()
+    default_groups = await _default_download_groups()
     external = configured_external_model_files()
     try:
         storage = model_storage()
@@ -1002,7 +1084,20 @@ def get_models_plan() -> dict:
         external_files=external,
         extra_roots=storage.managed_roots,
         verify_external_hashes=False,
+        default_groups=default_groups,
     )
+    # まとまりごとの名前と、既定で取得するか（画面で「追加で取得できるもの」を並べる）。
+    plan["groups"] = [
+        {
+            "id": group.id,
+            "display_name": group.display_name_ja,
+            "setting_key": group.setting_key,
+            "setting_value": group.setting_value,
+            "default": group.id in default_groups,
+            "description": group.description_ja,
+        }
+        for group in _download_groups_for_setup()
+    ]
     # 参照フォルダの指定が正しいか画面で分かるよう、走査できた件数も返す。
     plan["external_candidate_files"] = len(external)
     plan["download_target"] = storage.target
@@ -1137,16 +1232,17 @@ async def start_model_download(
 ):
     """不足モデルの取得ジョブを開始する。二重起動は防ぐ。
 
-    任意のモデル（MiniMax H3 など）は、まとまりの名前を指定したときだけ取得する。
+    既定では、本体一式と、いま使う設定（選んでいなければ、この端末へのおすすめ）に
+    当たるまとまりを取得する。ほかのまとまりは、名前を挙げたときか、すべてを
+    指定したときだけ取得する。
     """
     if jobs.find_active(["setup.models.download"]) is not None:
         raise HTTPException(status_code=409, detail="モデルの取得がすでに実行中です")
-    groups = set(request.groups) if request else set()
-    specs = [
-        spec
-        for spec in _download_specs_for_setup()
-        if not spec.optional or spec.group in groups
-    ]
+    groups = await _default_download_groups()
+    if request:
+        groups |= set(request.groups)
+    take_all = request is not None and request.all
+    specs = [spec for spec in _download_specs_for_setup() if take_all or spec.group in groups]
     if not specs:
         raise HTTPException(status_code=409, detail="取得対象のモデルがありません")
     job = jobs.create(JobCreate(kind="setup.models.download", payload={}))
@@ -4847,7 +4943,7 @@ async def generate_character_candidates(
             )
         }
     )
-    # int8 版は無くても要件の判定が「揃っている」になるため、選んだのに見えないことがある。
+    # 生成モデルはおすすめに合わせて取得するため、もう一方の形式は取得していないことがある。
     # 前の回を消してから気づくことのないよう、先に確かめる。
     await _ensure_diffusion_model_available(str(request.base_url), request.diffusion_model)
     # 上書きのときは、順番待ちに入れる前に前の回を消す（残す指定なら触らない）。

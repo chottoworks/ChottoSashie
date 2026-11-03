@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "description": "ちょっと挿絵の専用環境モードで取得するモデル。SHA256とサイズは各Hugging FaceリポジトリのLFSポインタから取得した実値。optional=true のものは既定では取得せず、利用者が選んだときだけ取得する（MiniMax H3 は合計約51GBあるため）。MiniMax H3 のテキストエンコーダーは nvfp4 版。Blackwell世代(RTX 50xx)より前のGPUでは、ComfyUI が nvfp4 の重みを展開して計算するため、RTX 40xx でも VRAM 24GB に収まって動く。取得先は版（コミット）で固定する。main を指すと、配布元が差し替えた時点でハッシュが合わず取得できなくなる。翻訳用の Gemma 4 E4B は MiniMax H3 の指示を英語へ直すためだけに使うので、H3 と同じ任意の組に入れる。",
+  "description": "ちょっと挿絵の専用環境モードで取得するモデル。SHA256とサイズは各Hugging FaceリポジトリのLFSポインタから取得した実値。group を持たないものは誰でも使う本体一式で、常に取得する。group を持つものは、groups に書いた設定の選択肢でだけ使うモデルで、その設定で選んでいる値（選んでいなければ、この端末へのおすすめ）に当たる group だけを既定で取得する。それ以外の group は、利用者が選んだときか「すべて取得」のときだけ取得する。MiniMax H3 のテキストエンコーダーは nvfp4 版。Blackwell世代(RTX 50xx)より前のGPUでは、ComfyUI が nvfp4 の重みを展開して計算するため、RTX 40xx でも VRAM 24GB に収まって動く。取得先は版（コミット）で固定する。main を指すと、配布元が差し替えた時点でハッシュが合わず取得できなくなる。翻訳用の Gemma 4 E4B は MiniMax H3 の指示を英語へ直すためだけに使うので、H3 と同じ組に入れる。",
   "license_notices": {
     "description": "取得を押す前に見せる利用条件。Apache-2.0 のように制限のないものは出さず、利用者の地域や用途によって使えないことがあるものだけを挙げる。条文は配布元のものが正本で、ここに書くのはその要点。",
     "minimax_h3": {
@@ -17,6 +17,46 @@
       "note_ja": "モデルはHugging Faceから直接取得します。このアプリは重みを再配布していません。正確な条件は上のリンク先の原文を確認してください。"
     }
   },
+  "groups": [
+    {
+      "id": "wan22",
+      "display_name_ja": "映像のみの動画（Wan 2.2）",
+      "description_ja": "カットの動画を映像だけで作るモデルです。「動画の作り方」で Wan 2.2 を選ぶときに使います。",
+      "setting": {
+        "key": "video_engine",
+        "value": "wan22"
+      },
+      "video_only": true
+    },
+    {
+      "id": "minimax_h3",
+      "display_name_ja": "音声付きの動画（MiniMax H3）",
+      "description_ja": "カットの動画を、音（声・効果音・音楽）まで一緒に作るモデルです。「動画の作り方」で MiniMax H3 を選ぶときに使います。容量が大きいので取得に時間がかかります。",
+      "setting": {
+        "key": "video_engine",
+        "value": "minimax_h3"
+      },
+      "video_only": true
+    },
+    {
+      "id": "candidate_bf16",
+      "display_name_ja": "人物候補の生成モデル（bf16）",
+      "description_ja": "人物候補の「生成モデル」で bf16 を選ぶときに使います。指定の効き方が最も素直です。",
+      "setting": {
+        "key": "candidate_precision",
+        "value": "bf16"
+      }
+    },
+    {
+      "id": "candidate_int8",
+      "display_name_ja": "人物候補の生成モデル（int8）",
+      "description_ja": "人物候補の「生成モデル」で int8 を選ぶときに使います。1枚あたりが速く、VRAMも少なくて済みます。",
+      "setting": {
+        "key": "candidate_precision",
+        "value": "int8"
+      }
+    }
+  ],
   "components": [
     {
       "id": "wan22_i2v_high_noise",
@@ -28,7 +68,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
       "external_read_only_reuse": true,
-      "video_only": true
+      "video_only": true,
+      "group": "wan22"
     },
     {
       "id": "wan22_i2v_low_noise",
@@ -40,7 +81,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
       "external_read_only_reuse": true,
-      "video_only": true
+      "video_only": true,
+      "group": "wan22"
     },
     {
       "id": "wan_umt5_xxl_fp8",
@@ -52,7 +94,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
       "external_read_only_reuse": true,
-      "video_only": true
+      "video_only": true,
+      "group": "wan22"
     },
     {
       "id": "wan21_vae",
@@ -64,7 +107,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
       "external_read_only_reuse": true,
-      "video_only": true
+      "video_only": true,
+      "group": "wan22"
     },
     {
       "id": "qwen_image_edit_2511_int8",
@@ -110,7 +154,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
       "external_read_only_reuse": true,
-      "video_only": true
+      "video_only": true,
+      "group": "wan22"
     },
     {
       "id": "wan22_i2v_lightning_low",
@@ -122,7 +167,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
       "external_read_only_reuse": true,
-      "video_only": true
+      "video_only": true,
+      "group": "wan22"
     },
     {
       "id": "qwen_image_edit_2511_lightning",
@@ -167,7 +213,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Z-Image",
       "external_read_only_reuse": true,
-      "note_ja": "蒸留していないベースモデル。人物候補は変化強度を cfg として効かせるため、cfg 1.0 前提の Turbo では作れない。"
+      "note_ja": "蒸留していないベースモデル。人物候補は変化強度を cfg として効かせるため、cfg 1.0 前提の Turbo では作れない。",
+      "group": "candidate_bf16"
     },
     {
       "id": "z-image-base-int8-diffusion",
@@ -179,7 +226,8 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/Z-Image",
       "external_read_only_reuse": true,
-      "note_ja": "人物候補を int8 で作るときに使う。bf16 版より速くVRAMも少なくて済むが、同じ種でも別の絵になる。"
+      "note_ja": "人物候補を int8 で作るときに使う。bf16 版より速くVRAMも少なくて済むが、同じ種でも別の絵になる。",
+      "group": "candidate_int8"
     },
     {
       "id": "qwen-3-4b-text-encoder",
@@ -234,7 +282,6 @@
       "license": "MiniMax H3 Community License Agreement",
       "source": "https://huggingface.co/Comfy-Org/MiniMax-H3",
       "external_read_only_reuse": true,
-      "optional": true,
       "group": "minimax_h3",
       "video_only": true
     },
@@ -248,7 +295,6 @@
       "license": "MiniMax H3 Community License Agreement",
       "source": "https://huggingface.co/Comfy-Org/MiniMax-H3",
       "external_read_only_reuse": true,
-      "optional": true,
       "group": "minimax_h3",
       "video_only": true
     },
@@ -262,7 +308,6 @@
       "license": "MiniMax H3 Community License Agreement",
       "source": "https://huggingface.co/Comfy-Org/MiniMax-H3",
       "external_read_only_reuse": true,
-      "optional": true,
       "group": "minimax_h3",
       "video_only": true
     },
@@ -276,7 +321,6 @@
       "license": "MiniMax H3 Community License Agreement",
       "source": "https://huggingface.co/Comfy-Org/MiniMax-H3",
       "external_read_only_reuse": true,
-      "optional": true,
       "group": "minimax_h3",
       "video_only": true
     },
@@ -290,7 +334,6 @@
       "license": "MiniMax H3 Community License Agreement",
       "source": "https://huggingface.co/Comfy-Org/MiniMax-H3",
       "external_read_only_reuse": true,
-      "optional": true,
       "group": "minimax_h3",
       "video_only": true
     },
@@ -304,7 +347,6 @@
       "license": "Apache-2.0",
       "source": "https://huggingface.co/Comfy-Org/gemma-4",
       "external_read_only_reuse": true,
-      "optional": true,
       "group": "minimax_h3",
       "video_only": true
     }

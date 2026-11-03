@@ -101,12 +101,21 @@ def _available_files(object_info: dict[str, Any], loader: str, input_name: str) 
     return []
 
 
+def _matches_setting(capability: dict[str, Any], settings: dict[str, str]) -> bool:
+    """設定の選択肢に結び付いた機能なら、いま選んでいる値に当たるか。結び付きが無ければ真。"""
+    setting = capability.get("setting")
+    if not isinstance(setting, dict):
+        return True
+    return settings.get(str(setting.get("key", ""))) == str(setting.get("value", ""))
+
+
 def check_requirements(
     object_info: dict[str, Any],
     manifest: dict[str, Any],
     *,
     include_video: bool = True,
     tool_status: Callable[[str, str], RequirementToolStatus] | None = None,
+    settings: dict[str, str] | None = None,
 ) -> RequirementsReport:
     """機能ごとの充足を調べる。
 
@@ -115,7 +124,12 @@ def check_requirements(
 
     `tool_status` は「道具のidと表示名を渡すと、その充足状態を返す」関数。渡されない
     ときは、確認できないものとして扱う（この土台は個々の道具の調べ方を持たない）。
+
+    `settings` は、設定の選択肢でだけ使う機能（`setting` を持つもの）を決める値。
+    選んでいる値に当たる機能だけを必須にし、ほかの選択肢の機能は任意として報告する。
+    モデルの取得と同じ値を渡し、確認と取得の対象をそろえる。
     """
+    chosen = settings or {}
     available_nodes = set(object_info.keys())
     capabilities: list[CapabilityRequirement] = []
 
@@ -172,7 +186,8 @@ def check_requirements(
                 id=str(capability.get("id", "")),
                 display_name=str(capability.get("display_name_ja", "")),
                 ready=ready,
-                optional=bool(capability.get("optional", False)),
+                optional=bool(capability.get("optional", False))
+                or not _matches_setting(capability, chosen),
                 present_nodes=present_nodes,
                 missing_nodes=missing_nodes,
                 models=models,

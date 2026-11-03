@@ -970,12 +970,15 @@ class ExportStatus(BaseModel):
 
 
 class ModelDownloadRequest(BaseModel):
-    """取得するモデルの範囲。既定（空）は必須のモデルだけ。
+    """取得するモデルの範囲。既定（空）は、本体一式といま使う設定のまとまりだけ。
 
-    任意のまとまり（例: MiniMax H3 は合計約51GB）は、名前を挙げたときだけ取得する。
+    ほかの選択肢のまとまり（例: MiniMax H3 は合計約51GB）は、名前を挙げたときか、
+    `all` を指定したときだけ取得する。
     """
 
     groups: list[str] = Field(default_factory=list, max_length=8)
+    # おすすめや選んでいる設定に関わらず、すべてのまとまりを取得する。
+    all: bool = False
 
 
 class ExportRequest(BaseModel):

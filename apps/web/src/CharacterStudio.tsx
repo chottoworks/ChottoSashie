@@ -4,10 +4,16 @@ import * as api from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EditableName } from "./EditableName";
 import { CompareLightbox, useLightbox } from "./Lightbox";
-import { useRememberedSetting } from "./preferences";
+import { useOffRecommendationNote, useRememberedSetting } from "./preferences";
 
 /** これ以上進まないジョブの状態。ここに入ったら追いかけるのをやめる。 */
 const TERMINAL_JOB_STATES = new Set(["completed", "failed", "cancelled", "interrupted"]);
+
+// 人物候補の生成モデルの選択肢（画面の表示名）。
+const CANDIDATE_PRECISION_LABELS: Record<api.CandidatePrecision, string> = {
+  bf16: "bf16（標準）",
+  int8: "int8（速い）",
+};
 
 function isActive(job: api.Job | null): boolean {
   return job !== null && !TERMINAL_JOB_STATES.has(job.state);
@@ -70,6 +76,7 @@ export function CharacterStudio({
   // 枚数・強度は、前回選んだ値から始める（毎回選び直させない）。
   const [candidateCount, setCandidateCount] = useRememberedSetting("candidate_count");
   const [candidatePrecision, setCandidatePrecision] = useRememberedSetting("candidate_precision");
+  const precisionNote = useOffRecommendationNote("candidate_precision", CANDIDATE_PRECISION_LABELS);
   const [variationStrength, setVariationStrength] = useRememberedSetting("variation_strength");
   // 作り直したときに前の回をどうするか（設定で選ぶ。既定は上書き）。
   const [candidateHistory] = useRememberedSetting("candidate_history");
@@ -805,8 +812,9 @@ export function CharacterStudio({
               value={candidatePrecision}
               onChange={(e) => setCandidatePrecision(e.target.value as api.CandidatePrecision)}
             >
-              <option value="bf16">bf16（標準）</option>
-              <option value="int8">int8（速い）</option>
+              {Object.entries(CANDIDATE_PRECISION_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </select>
             <label className="vs-muted" title="低いと画風に忠実で穏やか、高いと顔立ちと候補ごとの差が強く出ます。">
               変化強度 {variationStrength.toFixed(1)}
@@ -831,6 +839,7 @@ export function CharacterStudio({
                   : "人物候補を生成"}
             </button>
           </div>
+          {precisionNote && <div className="vs-note warn">{precisionNote}</div>}
           {candidateJob && (
             <div className="vs-banner warn">
               <strong>{candidateJob.message ?? "人物候補を生成しています"}</strong>

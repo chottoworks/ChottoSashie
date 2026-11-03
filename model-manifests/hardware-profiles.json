@@ -101,7 +101,7 @@
           "min_compute_capability": 8.9,
           "fallback": "wan22",
           "unmet_note_ja": "MiniMax H3 はVRAM 24GB以上かつRTX 40xx以降が要ります。テキストエンコーダーがnvfp4版（重みを4ビットまで落とした形式）で、RTX 50xxより前のGPUではComfyUIが重みを展開して計算するためです。RTX 40xxで動くことは確かめていますが、RTX 30xx以前では確かめていません。モデルの取得も約51GBあります。",
-          "extra_note_ja": "H3のモデル一式（約51GB）は既定では取得しません。セットアップの「モデルの準備」から追加してください。"
+          "extra_note_ja": "H3のモデル一式は約51GBあります。モデルの取得では、利用条件を確かめてから取得します。"
         },
         {
           "value": "wan22",

@@ -10,6 +10,11 @@
 
 セットアップの「この環境のおすすめ」もここへ書き込む。おすすめは**適用したときだけ**
 保存され、利用者があとから選び直した値を勝手に戻すことはしない。
+
+使うモデルが変わる項目（動画の作り方・人物候補の生成モデル）は、まだ選んでいなければ
+この端末へのおすすめを既定にする（`with_recommended`）。モデルの取得と確認もおすすめを
+既定にしているので、画面の既定だけが別のものを指して「取得していないモデル」を使おうと
+することのないようにする。
 """
 
 from __future__ import annotations
@@ -44,6 +49,9 @@ class PreferencesRead(BaseModel):
     # 最後に適用したおすすめの段（high/standard/light/minimum）。空なら未適用。
     # 画面で「おすすめのまま」かどうかを示すためだけに持つ。
     recommendation_tier: str = ""
+    # この端末へのおすすめ（使うモデルが変わる項目だけ）。保存はせず、読むたびに添える。
+    # 画面で、おすすめ以外を選んだときの注意を出すのに使う。
+    recommended: dict[str, str] = Field(default_factory=dict)
     updated_at: datetime | None = None
 
 
@@ -68,7 +76,7 @@ _ADAPTERS: dict[str, TypeAdapter[Any]] = {
         else field.annotation
     )
     for name, field in PreferencesRead.model_fields.items()
-    if name != "updated_at"
+    if name not in ("updated_at", "recommended")
 }
 
 PREFERENCES_TABLE_DDL = """
@@ -110,6 +118,43 @@ class PreferenceRepository:
                 continue
             latest = max(latest, row["updated_at"])
         return PreferencesRead(**values, updated_at=latest or None)
+
+    def stored_keys(self) -> set[str]:
+        """利用者が選んだ（＝使える値で保存されている）項目。"""
+        with self.database.connect() as connection:
+            rows = connection.execute("SELECT key, value FROM preferences").fetchall()
+        keys: set[str] = set()
+        for row in rows:
+            adapter = _ADAPTERS.get(row["key"])
+            if adapter is None:
+                continue
+            try:
+                adapter.validate_python(row["value"])
+            except ValidationError:
+                # 壊れた値は、読むときに既定へ戻る。選んでいないものとして扱う。
+                continue
+            keys.add(row["key"])
+        return keys
+
+    def with_recommended(self, recommended: dict[str, str]) -> PreferencesRead:
+        """まだ選んでいない項目を、渡したおすすめで埋めて返す（保存はしない）。
+
+        おすすめの値が検証を通らなければ、その項目は既定のまま。
+        """
+        current = self.get()
+        chosen = self.stored_keys()
+        values: dict[str, Any] = {}
+        for key, raw in recommended.items():
+            adapter = _ADAPTERS.get(key)
+            if adapter is None:
+                continue
+            try:
+                value = adapter.validate_python(raw)
+            except ValidationError:
+                continue
+            if key not in chosen:
+                values[key] = value
+        return current.model_copy(update={**values, "recommended": dict(recommended)})
 
     def set(self, request: PreferencesUpdate) -> PreferencesRead:
         updates = request.model_dump(exclude_none=True)

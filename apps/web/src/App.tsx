@@ -12,7 +12,7 @@ import { useLightbox } from "./Lightbox";
 import { PortraitCropper } from "./PortraitCropper";
 import { formatBytes, safeFileName } from "./format";
 import { chosenFigureId, withChosenFigure } from "./stillImageFigure";
-import { useRememberedSetting } from "./preferences";
+import { useOffRecommendationNote, usePreferences, useRememberedSetting } from "./preferences";
 import { stillImageUsageItems, useDeletion } from "./useDeletion";
 
 function useJobRunner() {
@@ -246,7 +246,9 @@ function SetupPanel({
   // 動作要件の判定は、この端末を調べた結果から取る（HardwarePanel が渡してくる）。
   const [hardware, setHardware] = useState<api.HardwareReport | null>(null);
   const [acceptBelowMinimum, setAcceptBelowMinimum] = useState(false);
-  const [acceptH3License, setAcceptH3License] = useState(false);
+  // 利用条件に同意したまとまり（例: minimax_h3）。
+  const [acceptedLicenses, setAcceptedLicenses] = useState<Record<string, boolean>>({});
+  const { preferences, reload: reloadPreferences } = usePreferences();
   // 何も無い環境から始める人が多いので、既定はアプリが一式を用意する方にする。
   const [mode, setMode] = useState<api.SetupMode>("managed_dedicated");
   // 既存のComfyUIを選んだときの初めの値は、ComfyUIの既定の番号。
@@ -398,6 +400,86 @@ function SetupPanel({
     return () => window.clearInterval(timer);
   }, [mode, runtimeStarting]);
 
+  // 使うモデルが変わる設定（動画の作り方・人物候補の生成モデル）が変わると、
+  // 既定で取得するものと確かめるものも変わる。おすすめの適用や切り替えのあとに読み直す。
+  const modelSettingsKey = `${preferences.video_engine}/${preferences.candidate_precision}`;
+  const firstModelSettings = useRef(true);
+  useEffect(() => {
+    if (firstModelSettings.current) {
+      firstModelSettings.current = false;
+      return;
+    }
+    if (mode === "existing_comfyui") return;
+    void api.getModelPlan().then(setPlan).catch(() => undefined);
+    void recheckIfReachable();
+    // 設定が変わったときだけ読み直す（mode や関数の作り直しでは読まない）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelSettingsKey]);
+
+  const runDownload = (request: api.ModelDownloadRequest) =>
+    void download.run(
+      async () => {
+        const job = await api.startModelDownload(request);
+        return { job_id: job.id };
+      },
+      async () => {
+        setPlan(await api.getModelPlan());
+        await recheckIfReachable();
+      },
+      setError,
+    );
+
+  /** 使う設定を、同じ項目のほかの選択肢へ切り替える（利用条件に同意しない人のため）。 */
+  const switchSetting = (group: api.ModelPlanGroup) =>
+    void guarded(async () => {
+      await api.putPreferences({ [group.setting_key]: group.setting_value } as Partial<api.Preferences>);
+      await reloadPreferences();
+    });
+
+  const renderLicenseNotice = (id: string, alternatives: api.ModelPlanGroup[]) => {
+    const notice = licenseNotice(id);
+    if (!notice) return null;
+    return (
+      <div key={id} className="vs-note warn">
+        <strong>{notice.title_ja}</strong>
+        <ul className="vs-license-points">
+          {notice.points_ja.map((point) => (
+            <li key={point}>{point}</li>
+          ))}
+        </ul>
+        <div className="vs-muted">{notice.note_ja}</div>
+        <div>
+          <a href={notice.url} target="_blank" rel="noreferrer">
+            {notice.license_name}（原文）
+          </a>
+        </div>
+        <label className="vs-accept">
+          <input
+            type="checkbox"
+            checked={acceptedLicenses[id] === true}
+            onChange={(e) => setAcceptedLicenses((current) => ({ ...current, [id]: e.target.checked }))}
+          />
+          {notice.consent_ja}
+        </label>
+        {alternatives.length > 0 && (
+          <div className="vs-row">
+            <span className="vs-muted">同意しない場合は、ほかの選択肢で作れます。</span>
+            {alternatives.map((other) => (
+              <button
+                key={other.id}
+                className="vs-btn ghost"
+                disabled={download.running}
+                onClick={() => switchSetting(other)}
+              >
+                {other.display_name}を使う
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const refreshPlan = useCallback(async () => {
     setPlanBusy(true);
     try {
@@ -446,25 +528,31 @@ function SetupPanel({
   // 任意の機能（MiniMax H3）の取得は、必須が揃ったあとでも辿り着けるようにする。
   const optionalPending =
     requirements?.capabilities.some((cap) => cap.optional && !cap.ready) === true;
-  // 任意のモデル（MiniMax H3）は、必須の準備状況と混ぜない。
+  // 今の設定で使わないモデル（ほかの選択肢のもの）は、必須の準備状況と混ぜない。
   const requiredComponents = plan?.components.filter((c) => !c.optional) ?? [];
   const missingModels = requiredComponents.filter((c) => !api.isModelReady(c.state));
   const readyModels = requiredComponents.filter((c) => api.isModelReady(c.state));
-  const h3Components = plan?.components.filter((c) => c.group === "minimax_h3") ?? [];
-  const h3Ready = h3Components.length > 0 && h3Components.every((c) => api.isModelReady(c.state));
-  const h3DownloadBytes = h3Components.reduce(
-    (sum, c) => sum + (api.isModelReady(c.state) ? 0 : c.download_bytes),
-    0,
-  );
+  const groupComponents = (id: string) => plan?.components.filter((c) => c.group === id) ?? [];
+  const groupReady = (id: string) => groupComponents(id).every((c) => api.isModelReady(c.state));
+  const groupMissingBytes = (id: string) =>
+    groupComponents(id).reduce((sum, c) => sum + (api.isModelReady(c.state) ? 0 : c.download_bytes), 0);
+  const visibleGroups = (plan?.groups ?? []).filter((group) => groupComponents(group.id).length > 0);
+  const defaultGroups = visibleGroups.filter((group) => group.default);
+  const extraGroups = visibleGroups.filter((group) => !group.default);
   const modelsReady = plan !== null && plan.required_download_bytes === 0;
+  const allModelsReady = plan !== null && plan.all_download_bytes === 0;
   const requirementsReady = requirements?.ready === true;
   const canComplete = Boolean(config?.configured) && requirementsReady;
 
   // 手順の番号は、その手順に固定で持たせる。描画のたびに並び順で振り直すと、
   // 判定材料が遅れて届いた手順が現れた瞬間に、同じ番号が別の作業を指してしまう。
   const showComfyStep = isManaged;
+  // 利用条件に制限があるまとまりは、取得を押す前に条件を読ませる。取得済みなら聞かない。
+  const licenseNotice = (id: string) =>
+    groupReady(id) ? undefined : plan?.license_notices?.[id];
+  const licensesAccepted = (ids: string[]) =>
+    ids.every((id) => !licenseNotice(id) || acceptedLicenses[id] === true);
   // 判定できなかったときは満たしていない扱いにしない（当てずっぽうで止めない）。
-  const h3Notice = plan?.license_notices?.minimax_h3;
   const belowMinimum =
     hardware?.recommendation.requirements.known === true
     && !hardware.recommendation.requirements.meets_minimum;
@@ -569,7 +657,8 @@ function SetupPanel({
         </div>
         <p className="vs-muted">
           GPUのVRAMと世代、メモリの量で、動かせるモデルと生成方法、1枚あたりの待ち時間が変わります。
-          調べた構成と、その構成で勧められる設定を出します。適用しなければ何も変わりません。
+          調べた構成と、その構成で勧められる設定を出します。動画の作り方と人物候補の生成モデルは、
+          選んでいなければこのおすすめを既定にし、モデルもおすすめに合わせて取得します。
         </p>
         <HardwarePanel videoEnabled={videoEnabled} onReport={setHardware} />
       </div>
@@ -799,8 +888,12 @@ function SetupPanel({
                     index={2}
                     title="モデルの取得"
                     done={modelsReady}
-                    doneLabel={h3Ready ? "すべて取得済み" : "必須はすべて取得済み"}
+                    doneLabel={allModelsReady ? "すべて取得済み" : "今の設定で使うものは取得済み"}
                   >
+                    <p className="vs-muted">
+                      この端末へのおすすめ（設定を選んでいれば、その設定）で使うモデルを取得します。
+                      ほかの設定で使うモデルは、下の「ほかの設定で使うモデル」から追加で取得できます。
+                    </p>
                     {/* 数十GBを取ったあとで「実用にならない」と気づくのは遅い。
                         止めはしないが、承知したことを一度確かめる。 */}
                     {belowMinimum && !modelsReady && (
@@ -817,6 +910,14 @@ function SetupPanel({
                         </label>
                       </div>
                     )}
+                    {/* 既定で取得するまとまりに利用条件の制限があるときは、取得を押す前に読ませる。
+                        同意しない人のために、同じ設定のほかの選択肢へ切り替えられるようにする。 */}
+                    {defaultGroups.map((group) =>
+                      renderLicenseNotice(
+                        group.id,
+                        extraGroups.filter((other) => other.setting_key === group.setting_key),
+                      ),
+                    )}
                     <div className="vs-row">
                       <button
                         className="vs-btn"
@@ -825,20 +926,9 @@ function SetupPanel({
                           || modelsReady
                           || plan === null
                           || (belowMinimum && !acceptBelowMinimum)
+                          || !licensesAccepted(defaultGroups.map((group) => group.id))
                         }
-                        onClick={() =>
-                          void download.run(
-                            async () => {
-                              const job = await api.startModelDownload();
-                              return { job_id: job.id };
-                            },
-                            async () => {
-                              setPlan(await api.getModelPlan());
-                              await recheckIfReachable();
-                            },
-                            setError,
-                          )
-                        }
+                        onClick={() => runDownload({})}
                       >
                         {modelsReady
                           ? "取得の必要はありません"
@@ -859,10 +949,10 @@ function SetupPanel({
                         <div className={`vs-banner ${modelsReady ? "ok" : "warn"}`}>
                           {modelsReady ? (
                             <>
-                              <strong>✓ 必要なモデルはすべて揃っています</strong>
+                              <strong>✓ 今の設定で使うモデルはすべて揃っています</strong>
                               <span>
-                                {plan.components.length}件・合計{" "}
-                                {formatBytes(plan.components.reduce((sum, c) => sum + c.expected_bytes, 0))}
+                                {requiredComponents.length}件・合計{" "}
+                                {formatBytes(requiredComponents.reduce((sum, c) => sum + c.expected_bytes, 0))}
                                 。追加のダウンロードはありません。
                               </span>
                             </>
@@ -922,91 +1012,87 @@ function SetupPanel({
                             </div>
                           </details>
                         )}
-                        {/* 任意のモデルは、必須の準備と分けて「使いたい人だけ」取得できるようにする。 */}
-                        {h3Components.length > 0 && (
-                          <details className="vs-collapse" open={h3Ready}>
-                            <summary>
-                              音声付きの動画を作る（MiniMax H3・任意）
-                              {h3Ready ? "：取得済み" : `：未取得・${formatBytes(h3DownloadBytes)}`}
-                            </summary>
+                        {/* 今の設定で使わないモデルは、必須の準備と分けて「使いたい人だけ」取得できるようにする。 */}
+                        {extraGroups.length > 0 && (
+                          <div className="vs-collapse">
+                            <strong>ほかの設定で使うモデル（任意）</strong>
                             <p className="vs-muted">
-                              カットの動画を、音（声・効果音・音楽）まで一緒に生成できるモデルです。
-                              使わないなら取得しなくて構いません。容量が大きいので時間がかかります。
+                              今の設定では使いません。各画面でこの設定を選ぶときに取得してください。
+                              取得していない設定を選んで生成すると、モデルが見つからずに止まります。
                             </p>
-                            {/* 利用条件に制限があるモデルは、取得を押す前に条件を読ませる。
-                                ffmpegと同じ考え方で、何を入れるのかを隠さない。 */}
-                            {h3Notice && !h3Ready && (
-                              <div className="vs-note warn">
-                                <strong>{h3Notice.title_ja}</strong>
-                                <ul className="vs-license-points">
-                                  {h3Notice.points_ja.map((point) => (
-                                    <li key={point}>{point}</li>
-                                  ))}
-                                </ul>
-                                <div className="vs-muted">{h3Notice.note_ja}</div>
-                                <div>
-                                  <a href={h3Notice.url} target="_blank" rel="noreferrer">
-                                    {h3Notice.license_name}（原文）
-                                  </a>
-                                </div>
-                                <label className="vs-accept">
-                                  <input
-                                    type="checkbox"
-                                    checked={acceptH3License}
-                                    onChange={(e) => setAcceptH3License(e.target.checked)}
-                                  />
-                                  {h3Notice.consent_ja}
-                                </label>
-                              </div>
-                            )}
+                            {extraGroups.map((group) => {
+                              const components = groupComponents(group.id);
+                              const ready = groupReady(group.id);
+                              const bytes = groupMissingBytes(group.id);
+                              return (
+                                <details key={group.id} className="vs-collapse" open={!ready && Boolean(licenseNotice(group.id))}>
+                                  <summary>
+                                    {group.display_name}
+                                    {ready ? "：取得済み" : `：未取得・${formatBytes(bytes)}`}
+                                  </summary>
+                                  {group.description && <p className="vs-muted">{group.description}</p>}
+                                  {renderLicenseNotice(group.id, [])}
+                                  <div className="vs-row">
+                                    <button
+                                      className="vs-btn ghost"
+                                      disabled={
+                                        download.running
+                                        || ready
+                                        || plan === null
+                                        || !licensesAccepted([group.id])
+                                      }
+                                      onClick={() => runDownload({ groups: [group.id] })}
+                                    >
+                                      {ready
+                                        ? "取得済み"
+                                        : download.running
+                                          ? "取得中..."
+                                          : `取得する（${formatBytes(bytes)}）`}
+                                    </button>
+                                  </div>
+                                  <div className="vs-model-list">
+                                    {components.map((c) => (
+                                      <div
+                                        key={c.id}
+                                        className={`vs-model-row ${api.isModelReady(c.state) ? "done" : ""}`}
+                                      >
+                                        <span>
+                                          {api.isModelReady(c.state) ? "✓ " : ""}
+                                          {c.display_name}
+                                        </span>
+                                        <b>
+                                          {formatBytes(c.expected_bytes)}・{api.modelStateLabel(c.state)}
+                                          {c.license && `・${c.license}`}
+                                        </b>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              );
+                            })}
+                            {/* おすすめに関わらず、どの設定でも使えるようにしておきたい人向け。 */}
                             <div className="vs-row">
                               <button
                                 className="vs-btn ghost"
                                 disabled={
                                   download.running
-                                  || h3Ready
-                                  || plan === null
-                                  || (h3Notice !== undefined && !acceptH3License)
+                                  || allModelsReady
+                                  || (belowMinimum && !acceptBelowMinimum)
+                                  || !licensesAccepted(plan.groups.map((group) => group.id))
                                 }
-                                onClick={() =>
-                                  void download.run(
-                                    async () => {
-                                      const job = await api.startModelDownload(["minimax_h3"]);
-                                      return { job_id: job.id };
-                                    },
-                                    async () => {
-                                      setPlan(await api.getModelPlan());
-                                      await recheckIfReachable();
-                                    },
-                                    setError,
-                                  )
-                                }
+                                onClick={() => runDownload({ all: true })}
                               >
-                                {h3Ready
-                                  ? "取得済み"
-                                  : download.running
-                                    ? "取得中..."
-                                    : `MiniMax H3 を取得（${formatBytes(h3DownloadBytes)}）`}
+                                {allModelsReady
+                                  ? "すべて取得済み"
+                                  : `おすすめに関わらず、すべて取得（${formatBytes(plan.all_download_bytes)}）`}
                               </button>
                             </div>
-                            <div className="vs-model-list">
-                              {h3Components.map((c) => (
-                                <div
-                                  key={c.id}
-                                  className={`vs-model-row ${api.isModelReady(c.state) ? "done" : ""}`}
-                                >
-                                  <span>
-                                    {api.isModelReady(c.state) ? "✓ " : ""}
-                                    {c.display_name}
-                                  </span>
-                                  <b>
-                                    {formatBytes(c.expected_bytes)}・{api.modelStateLabel(c.state)}
-                                    {c.license && `・${c.license}`}
-                                  </b>
-                                </div>
-                              ))}
-                            </div>
-                          </details>
+                            {!allModelsReady && !licensesAccepted(plan.groups.map((group) => group.id)) && (
+                              <p className="vs-muted">
+                                すべて取得するには、利用条件のあるモデルの条件を読んで同意してください。
+                              </p>
+                            )}
+                          </div>
                         )}
                       </>
                     )}
@@ -5079,6 +5165,10 @@ function SceneCutsCard({
   // 動画生成に使うモデル。選び直すとそれが次回からの既定になる
   // （H3で作ると決めた人に、毎回選び直させない）。
   const [engine, setEngine] = useRememberedSetting("video_engine");
+  const engineNote = useOffRecommendationNote(
+    "video_engine",
+    Object.fromEntries(api.VIDEO_ENGINES.map((option) => [option.id, option.label])),
+  );
   const [error, setError] = useState<string | null>(null);
   const video = useJobRunner();
   useEffect(() => {
@@ -5148,6 +5238,7 @@ function SceneCutsCard({
         <div className="vs-muted">
           {api.VIDEO_ENGINES.find((option) => option.id === engine)?.note}
         </div>
+        {engineNote && <div className="vs-note warn">{engineNote}</div>}
       </div>
       {/* 指示はカットの設定にまとめて書く。追加の前に書く欄を別に持つと、同じ指示の書き場所が2つになる。 */}
       <button

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "description": "ちょっと挿絵の各機能が要求する ComfyUI ノード・モデルファイルと、この端末に要る道具。ノードとモデルは実ComfyUIの object_info と突き合わせて確認する。tools は ComfyUI の外で動くもので、確認と用意はアプリ側が受け持つ。optional=true の機能は任意なので、不足していても全体の判定は「揃っている」のままにする。",
+  "description": "ちょっと挿絵の各機能が要求する ComfyUI ノード・モデルファイルと、この端末に要る道具。ノードとモデルは実ComfyUIの object_info と突き合わせて確認する。tools は ComfyUI の外で動くもので、確認と用意はアプリ側が受け持つ。optional=true の機能は任意なので、不足していても全体の判定は「揃っている」のままにする。setting を持つ機能は、その設定で選んでいる値（選んでいなければ、この端末へのおすすめ）に当たるときだけ必須にし、それ以外は任意として扱う。モデルの取得（video-models.json の groups）と同じ決め方にして、確認と取得の対象をそろえる。",
   "capabilities": [
     {
       "id": "asset_generation",
@@ -149,12 +149,15 @@
           "display_name_ja": "Wan 2.2 I2V Lightning LoRA 低ノイズ（4ステップ）"
         }
       ],
-      "video_only": true
+      "video_only": true,
+      "setting": {
+        "key": "video_engine",
+        "value": "wan22"
+      }
     },
     {
       "id": "i2v_minimax_h3",
-      "display_name_ja": "カットの動画生成（MiniMax H3・音声付き / 任意）",
-      "optional": true,
+      "display_name_ja": "カットの動画生成（MiniMax H3・音声付き）",
       "nodes": [
         "UNETLoader",
         "LoraLoaderModelOnly",
@@ -204,7 +207,11 @@
           "display_name_ja": "MiniMax H3 高速化LoRA（8ステップ）"
         }
       ],
-      "video_only": true
+      "video_only": true,
+      "setting": {
+        "key": "video_engine",
+        "value": "minimax_h3"
+      }
     },
     {
       "id": "character_figure",
@@ -228,12 +235,6 @@
         "SaveImage"
       ],
       "models": [
-        {
-          "loader": "UNETLoader",
-          "input": "unet_name",
-          "file": "z_image_bf16.safetensors",
-          "display_name_ja": "Z-Image 生成モデル（人物候補の生成に使用）"
-        },
         {
           "loader": "CLIPLoader",
           "input": "clip_name",
@@ -279,10 +280,29 @@
       ]
     },
     {
+      "id": "character_candidate",
+      "display_name_ja": "人物候補の生成（bf16）",
+      "setting": {
+        "key": "candidate_precision",
+        "value": "bf16"
+      },
+      "notes_ja": "人物候補の生成モデルで bf16 を選んでいるとき（選んでいなければ、おすすめが bf16 のとき）に使う。",
+      "nodes": [
+        "UNETLoader"
+      ],
+      "models": [
+        {
+          "loader": "UNETLoader",
+          "input": "unet_name",
+          "file": "z_image_bf16.safetensors",
+          "display_name_ja": "Z-Image 生成モデル（人物候補の生成に使用）"
+        }
+      ]
+    },
+    {
       "id": "character_candidate_int8",
-      "display_name_ja": "人物候補の生成（int8 / 任意）",
-      "optional": true,
-      "notes_ja": "人物候補の生成モデルで int8 を選んだときに使う。既定の bf16 だけで人物候補は作れるため、無くても全体の判定は「揃っている」のままにする（optional）。",
+      "display_name_ja": "人物候補の生成（int8）",
+      "notes_ja": "人物候補の生成モデルで int8 を選んでいるとき（選んでいなければ、おすすめが int8 のとき）に使う。",
       "nodes": [
         "UNETLoader"
       ],
@@ -293,13 +313,16 @@
           "file": "z_image_int8_convrot.safetensors",
           "display_name_ja": "Z-Image 生成モデル（人物候補, int8）"
         }
-      ]
+      ],
+      "setting": {
+        "key": "candidate_precision",
+        "value": "int8"
+      }
     },
     {
       "id": "prompt_translation",
       "display_name_ja": "指示文の日本語→英語変換（MiniMax H3 用）",
-      "optional": true,
-      "notes_ja": "セリフ以外の指示を英語へ直してから動画生成へ渡す。動きの指示とセリフの両方が日本語だと、MiniMax H3 は区別できず説明文まで読み上げる。無い場合は日本語のまま送られるため、全体の判定は「揃っている」のままにする（optional）。",
+      "notes_ja": "セリフ以外の指示を英語へ直してから動画生成へ渡す。動きの指示とセリフの両方が日本語だと、MiniMax H3 は区別できず説明文まで読み上げる。H3 で動画を作る設定のときだけ要る。",
       "nodes": [
         "CLIPLoader",
         "TextGenerate",
@@ -312,7 +335,12 @@
           "file": "gemma4_e4b_it_fp8_scaled.safetensors",
           "display_name_ja": "Gemma 4 E4B テキストエンコーダー（文の生成に使う）"
         }
-      ]
+      ],
+      "video_only": true,
+      "setting": {
+        "key": "video_engine",
+        "value": "minimax_h3"
+      }
     },
     {
       "id": "export",

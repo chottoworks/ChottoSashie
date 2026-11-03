@@ -180,7 +180,8 @@ export function HardwarePanel({
       {hasSettings && (
         <p className="vs-muted" style={{ marginBottom: 0 }}>
           適用すると、各画面の初期表示がこの値になります。あとから画面ごとに選び直せて、
-          選び直した値がそのまま次回の既定になります。
+          選び直した値がそのまま次回の既定になります。おすすめ以外を選ぶと、モデルの追加取得が
+          必要になる場合があります。
         </p>
       )}
     </div>

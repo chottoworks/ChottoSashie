@@ -186,13 +186,13 @@ def test_requirements_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPat
         "i2v",
         "i2v_minimax_h3",
         "character_figure",
+        "character_candidate",
         "character_candidate_int8",
         "prompt_translation",
         "export",
     }
-    # MiniMax H3・日本語→英語変換・書き出し・人物候補の int8 版は任意なので、全体の判定を
-    # 左右しない印が付く（書き出しが無くても、カット1本ずつは保存できる。人物候補は bf16 で
-    # 作れる）。
+    # 書き出しは任意（無くてもカット1本ずつは保存できる）。設定の選択肢に結び付いた機能は、
+    # 選んでいない方が任意になる。構成を判定できない端末では設定の既定（Wan 2.2・bf16）に従う。
     optional = {c["id"] for c in body["capabilities"] if c["optional"]}
     assert optional == {
         "i2v_minimax_h3",
@@ -200,6 +200,30 @@ def test_requirements_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPat
         "export",
         "character_candidate_int8",
     }
+
+
+def test_requirements_follow_recommendation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, set_hardware
+) -> None:
+    """取得と同じく、おすすめの選択肢だけを必須として確かめる。"""
+    async def object_info(_self):
+        return {"UNETLoader": {"input": {"required": {"unet_name": [[], {}]}}}}
+
+    monkeypatch.setattr(main.ComfyClient, "object_info", object_info)
+    set_hardware(vram_gb=32)
+
+    body = client.get(
+        "/api/v1/setup/requirements", params={"base_url": "http://127.0.0.1:8190"}
+    ).json()
+    optional = {c["id"] for c in body["capabilities"] if c["optional"]}
+    assert optional == {"i2v", "export", "character_candidate_int8"}
+
+    set_hardware(vram_gb=12)
+    body = client.get(
+        "/api/v1/setup/requirements", params={"base_url": "http://127.0.0.1:8190"}
+    ).json()
+    optional = {c["id"] for c in body["capabilities"] if c["optional"]}
+    assert optional == {"i2v_minimax_h3", "prompt_translation", "export", "character_candidate"}
 
 
 def test_requirements_endpoint_502_when_comfy_unreachable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
