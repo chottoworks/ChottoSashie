@@ -669,7 +669,7 @@ def test_replacing_the_default_figure_changes_the_portrait_version(
 def test_edit_prompt_keeps_the_figure_conditions(
     client: TestClient, fake_comfy: dict[str, list]
 ) -> None:
-    """出来上がりが立ち絵の条件（全身・素背景・1人）を満たすよう指示する。"""
+    """変えるのは衣装・持ち物だけで、立ち絵の条件（全身・素背景・1人）と画風は元のまま保たせる。"""
     project_id, character_id = _character(client)
     figure = _uploaded_figure(client, character_id)
     prop_id = _prop_with_image(client, project_id)
@@ -683,14 +683,23 @@ def test_edit_prompt_keeps_the_figure_conditions(
 
     workflow = fake_comfy["workflows"][before]
     prompt = workflow["20"]["inputs"]["prompt"]
+    assert prompt.startswith("Edit image 1.")
     assert "コートを着せる." in prompt
     assert "The person in image 1 is wearing or holding the object in image 2." in prompt
     assert "Keep that object exactly as in its own image." in prompt
-    assert "Never crop at the waist or thighs." in prompt
-    assert "Plain light-gray background" in prompt
-    assert "a single person and nobody else" in prompt
-    # 衣装だけを変え、顔・体格は元の立ち絵のまま。
-    assert "Change only their clothing and the items they carry." in prompt
+    # 衣装だけを変え、頼んでいない持ち物は足さない。
+    assert "Change only the clothing and the belongings described above." in prompt
+    assert "Do not add any other items." in prompt
+    # 立ち絵の条件と画風は、新しく描かせずに元の立ち絵のまま保たせる。
+    # （背景の色や写真・イラストを描く対象として書くと、絵全体が描き直される）
+    assert "from the top of the head down to both shoes" in prompt
+    assert "the plain background" in prompt
+    assert "the art style, line work, coloring and shading" in prompt
+    assert "light-gray" not in prompt
+    assert "photographic" not in prompt
+    assert "The person appears only once." in prompt
+    # 作品全体の画風は足さない（元の立ち絵の画風が手本になる）。
+    assert "作品全体の画風" not in prompt
     # 高速化LoRAは外す（4ステップでは指示も立ち絵の条件も守られない）。
     assert "3" not in workflow
     assert workflow["30"]["inputs"]["steps"] > 4

@@ -1890,7 +1890,7 @@ async def start_character_figure_edit(
     source = _figure_or_404(figure_id)
     if source.state != "completed" or not source.image_path:
         raise HTTPException(status_code=409, detail="まだ出来ていない立ち絵は変更できません")
-    character = _character_or_404(source.character_id)
+    _character_or_404(source.character_id)
 
     base_url = _resolve_base_url(request.base_url)
     await _ensure_diffusion_model_available(base_url, DEFAULT_COMPOSITION_DIFFUSION_MODEL)
@@ -1900,11 +1900,7 @@ async def start_character_figure_edit(
     except (DerivationError, AssetNotFoundError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
-    prompt = build_figure_variation_prompt(
-        request.instruction,
-        len(sources) - 1,
-        _project_illustration_style(character.project_id),
-    )
+    prompt = build_figure_variation_prompt(request.instruction, len(sources) - 1)
     seed = request.seed if request.seed is not None else randbelow(9_007_199_254_740_967)
     edits = FigureEditRepository(database)
     try:
@@ -3032,7 +3028,7 @@ async def make_still_image_pose(
     current = record.spec if record is not None else StillImageCharacterSpec()
     spec = request.spec.posing().model_copy(update={"placement": current.placement})
     chosen.upsert(still_image_id, character_id, spec, record.figure_id if record else None)
-    prompt = build_pose_prompt(spec, _project_illustration_style(still_image.project_id))
+    prompt = build_pose_prompt(spec)
     seed = request.seed if request.seed is not None else randbelow(9_007_199_254_740_967)
     payload = {
         **request.model_dump(mode="json"),

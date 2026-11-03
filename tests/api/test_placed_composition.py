@@ -49,17 +49,24 @@ def test_pose_prompt_is_empty_without_a_spec() -> None:
 
 def test_pose_prompt_carries_the_spec_and_keeps_the_figure_rules() -> None:
     prompt = build_pose_prompt(
-        StillImageCharacterSpec(direction="右向き", placement="左側に小さく"), "淡い水彩"
+        StillImageCharacterSpec(direction="右向き", placement="左側に小さく")
     )
 
-    assert prompt.startswith("体の向きは右向き。")
+    assert prompt.startswith("Edit image 1. 体の向きは右向き。")
     # 配置は姿ではなく位置で決めるので、姿を作る文には入れない。
     assert "左側に小さく" not in prompt
-    # 次に背景を抜けるよう、素背景・全身・1人だけのまま作らせる。
-    assert "Plain light-gray background" in prompt
-    assert "Show the whole body" in prompt
-    assert "Show the person from image 1 only once." in prompt
-    assert prompt.endswith("作品全体の画風: 淡い水彩")
+    assert "Change only the pose, the direction the body faces and the facial expression" in prompt
+    assert "Do not add any items." in prompt
+    # 次に背景を抜けるよう、素背景・全身・1人だけを、元の立ち絵のまま保たせる。
+    # （背景の色や写真・イラストを描く対象として書くと、絵全体が描き直される）
+    assert "from the top of the head down to both shoes" in prompt
+    assert "the plain background" in prompt
+    assert "the art style, line work, coloring and shading" in prompt
+    assert "light-gray" not in prompt
+    assert "photographic" not in prompt
+    assert "The person appears only once." in prompt
+    # 作品全体の画風は足さない（元の立ち絵の画風が手本になる）。
+    assert "作品全体の画風" not in prompt
 
 
 def test_blend_prompt_keeps_what_was_placed() -> None:
@@ -390,7 +397,7 @@ def test_pose_with_a_spec_edits_then_cuts_out_and_saves_the_spec(
 
     workflow = fake_comfy["workflows"][-1]
     assert workflow["103"]["inputs"]["image"] == ["31", 0]
-    assert workflow["20"]["inputs"]["prompt"].startswith("体の向きは右向き。")
+    assert workflow["20"]["inputs"]["prompt"].startswith("Edit image 1. 体の向きは右向き。")
     # 姿は丁寧な設定で作る。
     assert workflow["30"]["inputs"]["steps"] > 4
     assert character["spec"]["direction"] == "右向き"

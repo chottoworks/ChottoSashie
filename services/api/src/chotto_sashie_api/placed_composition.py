@@ -90,11 +90,18 @@ def pose_outdated(
     return pose_figure_id != (figure_id or "") or pose_spec.posing() != spec.posing()
 
 
-def build_pose_prompt(spec: StillImageCharacterSpec, illustration_style: str = "") -> str:
+def build_pose_prompt(spec: StillImageCharacterSpec) -> str:
     """姿を作る編集の指示文。指定が空なら空文字（編集せず、切り抜くだけにする）。
 
-    保つものと立ち絵の条件（全身・素背景・1人だけ）は、立ち絵の変更と同じ言い切り方に
-    する。素背景を保たせるのは、次の背景除去できれいに抜けるようにするため。
+    書き方は立ち絵の変更と同じにする（`derivation.build_figure_variation_prompt`）。
+    「image 1 の編集」だと言い切り、変えるもの（姿勢・体の向き・表情）以外を元の
+    立ち絵のまま保てと言う。立ち絵の条件（全身・素背景・1人だけ）も、保つものとして挙げる。
+    素背景を保たせるのは、次の背景除去できれいに抜けるようにするため。
+
+    背景の色や写真・イラストの別を、新しく描く対象として書かない。実機（同じ立ち絵・
+    同じ種）では、「背景を薄いグレーに」「写真の参照は写真のまま…」と書き、作品全体の
+    画風を足すと、イラストの立ち絵が3DCG寄りの絵柄と明るい肌に描き直され、頼んでいない
+    棒や荷物も足された。保つものとして書くと、絵柄・肌の色・背景が保たれた。
     """
     instruction = person_instruction(
         pose=spec.pose, direction=spec.direction, expression=spec.expression, notes=spec.notes
@@ -102,21 +109,18 @@ def build_pose_prompt(spec: StillImageCharacterSpec, illustration_style: str = "
     if not instruction:
         return ""
     lines = [
+        "Edit image 1.",
         instruction,
-        "Keep the person's face, hairstyle, hair color, eye color, body proportions, outfit, "
-        "accessories and the items they carry exactly as in image 1. Change only the pose, the "
-        "direction the body faces and the facial expression, following the instruction above.",
-        "Show the whole body from the top of the head down to both shoes, with the feet inside "
-        "the frame. Never crop at the waist or thighs.",
-        "Plain light-gray background, no scenery, no props on the floor.",
-        "The scene contains a single person and nobody else. "
-        "Show the person from image 1 only once. Do not duplicate or repeat them.",
-        "Render in the same visual style as image 1 "
-        "(photographic references stay photographic, illustrated references stay illustrated). "
-        "Do not turn photographic subjects into drawings, paintings or anime.",
+        "Change only the pose, the direction the body faces and the facial expression, "
+        "following the instruction above. Do not add any items.",
+        "Everything else stays exactly as in image 1: the face, hairstyle, hair color, skin "
+        "tone, eye color, body shape, outfit, accessories and the items they carry, the whole "
+        "body from the top of the head down to both shoes inside the frame, the plain "
+        "background with no scenery and no props on the floor, and the art style, line work, "
+        "coloring and shading.",
+        "The person appears only once. Do not add anyone else, and do not duplicate or "
+        "repeat them.",
     ]
-    if illustration_style.strip():
-        lines.append(f"作品全体の画風: {illustration_style.strip()}")
     return " ".join(lines)
 
 

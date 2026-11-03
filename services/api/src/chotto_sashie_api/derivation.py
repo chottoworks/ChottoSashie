@@ -42,23 +42,30 @@ class DerivationError(ValueError):
     pass
 
 
-def build_figure_variation_prompt(
-    instruction: str,
-    prop_count: int,
-    illustration_style: str = "",
-) -> str:
+def build_figure_variation_prompt(instruction: str, prop_count: int) -> str:
     """立ち絵の変更に使う指示文。
 
-    **変えるのは衣装と持ち物だけ**で、顔・髪・目の色・体型・画風は元の立ち絵のまま。
-    姿勢を変える指示はここでは出さない（姿勢は静止画の合成のときに指定する）。
+    **変えるのは衣装と持ち物だけ**で、顔・髪・肌の色・体型・姿勢・背景・画風は元の
+    立ち絵のまま。姿勢を変える指示はここでは出さない（姿勢は静止画の合成のときに指定する）。
 
-    出来上がりが立ち絵として使えるよう、全身・素背景・1人だけを毎回言い切る。
-    書かないと、合成のときに腰から上だけの画像や、背景の付いた画像が混ざる。
+    **「image 1 の編集」だと言い切り、変えないものを元の立ち絵のまま保てと言う。**
+    出来上がりの条件（素背景の色・写真かイラストか）を新しく描く対象として書くと、
+    衣装だけでなく絵全体が描き直される。実機（同じ立ち絵・同じ種）では、
+    「背景を薄いグレーに」と書くと肌の色と顔立ちが変わり、「写真の参照は写真のまま、
+    イラストはイラストのまま」と書くと、線画のイラストが写真寄りの別人になった。
+    元の立ち絵は全身・素背景・1人の条件を満たしているので、それを保てと言えば
+    条件も保たれる（頭から靴までの枠も、保つものとして挙げる）。
+
+    持ち物は、小物を渡したか、利用者が指示に書いたときだけ変える。「持ち物も変えてよい」
+    とだけ書くと、スーツに鞄のように、頼んでいない物を持たせる。
+
+    作品全体の画風は足さない。立ち絵はその画風で作られていて、元の立ち絵の画風が
+    手本になる。足すと、それに合わせて顔が描き直される。
 
     利用者の指示は**日本語のまま**入れる。静止画の合成と同じ扱いで、英語へ直すと
     人数が壊れた実機の記録がある。
     """
-    lines: list[str] = []
+    lines = ["Edit image 1."]
 
     if prop_count:
         objects = " and ".join(_PROP_LABELS[:prop_count])
@@ -74,28 +81,20 @@ def build_figure_variation_prompt(
         lines.append(text if text[-1] in "。.!?！？" else f"{text}.")
 
     lines.append(
-        "Keep the person's face, hairstyle, hair color, eye color, body proportions and "
-        "identifying features exactly as in image 1. Change only their clothing and the "
-        "items they carry."
+        "Change only the clothing and the belongings described above. "
+        "Do not add any other items."
     )
-    # 立ち絵の条件。ここが崩れると、次の合成で使えない1枚が一覧に混ざる。
+    # 立ち絵の条件（全身・素背景・1人）も、元の立ち絵のまま保つものとして挙げる。
     lines.append(
-        "Show the whole body from the top of the head down to both shoes, with the feet "
-        "inside the frame, standing naturally and facing the camera. "
-        "Never crop at the waist or thighs."
-    )
-    lines.append("Plain light-gray background, no scenery, no props on the floor.")
-    lines.append(
-        "The scene contains a single person and nobody else. "
-        "Show the person from image 1 only once. Do not duplicate or repeat them."
+        "Everything else stays exactly as in image 1: the face, hairstyle, hair color, "
+        "skin tone, eye color, body shape, pose, the framing from the top of the head down "
+        "to both shoes, the plain background, and the art style, line work, coloring and "
+        "shading."
     )
     lines.append(
-        "Render in the same visual style as image 1 "
-        "(photographic references stay photographic, illustrated references stay illustrated). "
-        "Do not turn photographic subjects into drawings, paintings or anime."
+        "The person appears only once. Do not add anyone else, and do not duplicate or "
+        "repeat them."
     )
-    if illustration_style.strip():
-        lines.append(f"作品全体の画風: {illustration_style.strip()}")
     return " ".join(lines)
 
 
