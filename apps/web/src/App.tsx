@@ -48,7 +48,7 @@ function useJobRunner() {
         const job = await api.pollJob(job_id, (j) => {
           setProgress(j.progress);
           // 順番待ちの間は、ジョブにまだ言葉が無い。待っていることをその場で分かるようにする。
-          setMessage(j.state === "queued" ? "順番待ちです。前の処理が終わると始まります" : j.message ?? "");
+          setMessage(j.state === "queued" ? "順番待ちです。ComfyUIの準備と前の処理が終わると始まります" : j.message ?? "");
         });
         // 中止は利用者の操作なので、失敗としては扱わない。
         if (job.state === "cancelled") {

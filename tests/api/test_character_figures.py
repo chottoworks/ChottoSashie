@@ -5,7 +5,10 @@
 （人物を消せば消え、静止画からは参照されるだけ）もここで見る。
 """
 
+import asyncio
 import base64
+import threading
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -378,6 +381,37 @@ def test_edit_result_waits_until_saved(
     # 立ち絵そのものはまだ元のまま。一覧にも増えない。
     assert client.get(figure["url"]).content == _TINY_PNG
     assert len(client.get(f"/api/v1/characters/{character_id}/figures").json()) == 1
+
+
+def test_edit_cancelled_while_waiting_is_not_sent(
+    client: TestClient, fake_comfy: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """待っている間に中止した変更はComfyUIへ送らず、「変更中」のまま残さない。"""
+    _project_id, character_id = _character(client)
+    figure = _uploaded_figure(client, character_id)
+    engine_ready = threading.Event()
+
+    async def wait_until_ready(_job_id: str) -> None:
+        while not engine_ready.is_set():
+            await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(main.gpu_queue, "_wait_until_ready", wait_until_ready)
+
+    response = client.post(
+        f"/api/v1/character-figures/{figure['id']}/edits", json={"instruction": "帽子を足す"}
+    )
+    assert response.status_code == 200, response.text
+    assert client.post(f"/api/v1/jobs/{response.json()['job']['id']}/cancel").status_code == 200
+    engine_ready.set()
+
+    for _ in range(200):
+        figures = client.get(f"/api/v1/characters/{character_id}/figures").json()
+        if figures[0]["edit"]["state"] == "failed":
+            break
+        time.sleep(0.01)
+    assert figures[0]["edit"]["state"] == "failed"
+    assert fake_comfy["workflows"] == []
+    assert fake_comfy["uploads"] == []
 
 
 def test_saving_an_edit_replaces_the_figure_by_default(

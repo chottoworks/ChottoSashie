@@ -268,6 +268,11 @@ class RuntimeManager:
     def _owned_process_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
+    def owns_running_process(self) -> bool:
+        """このAPIが起動した専用ComfyUIのプロセスが動いているか（応答の有無は問わない）。"""
+        with self._lock:
+            return self._owned_process_running()
+
     def status(self, port: int = DEFAULT_MANAGED_PORT) -> dict[str, object]:
         with self._lock:
             plan = self._plan

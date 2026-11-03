@@ -104,6 +104,7 @@ from chotto_sashie_shared.managed_runtime import (
     ManagedRuntimeUnavailableError,
     autostart_managed_comfyui,
     start_managed_comfyui,
+    wait_while_managed_comfyui_starts,
 )
 from chotto_sashie_shared.model_storage import (
     ModelStorage,
@@ -420,10 +421,24 @@ def describe_video_job_kind(kind: str) -> str:
 
 
 gpu_slot = GpuSlot(VIDEO_GPU_JOB_KINDS, describe_video_job_kind)
-# GPUを使う処理の順番待ち。実行中でも断らず、前の処理が終わったら次を始める。
-gpu_queue = GpuQueue(VIDEO_GPU_JOB_KINDS)
 # managed_* モードで、このAPIが起動・所有する専用ComfyUI。
 runtime_manager = RuntimeManager()
+# アプリ起動時の自動起動。動いている間は、まだプロセスが無くても起動中として扱う。
+_autostart_task: asyncio.Task[None] | None = None
+
+
+async def _wait_for_comfyui_startup(job_id: str) -> None:
+    """専用ComfyUIの起動が進んでいる間、順番が来たジョブを待たせる。"""
+    await wait_while_managed_comfyui_starts(
+        SetupConfigRepository(database).get(),
+        runtime_manager,
+        autostart_pending=lambda: _autostart_task is not None and not _autostart_task.done(),
+        should_stop=lambda: jobs.is_cancelled(job_id),
+    )
+
+
+# GPUを使う処理の順番待ち。実行中でも断らず、前の処理が終わったら次を始める。
+gpu_queue = GpuQueue(VIDEO_GPU_JOB_KINDS, wait_until_ready=_wait_for_comfyui_startup)
 # 専用ComfyUIの管理領域（runtimeプロファイル・yaml等をここへ置く。アプリ固有）。
 MANAGED_ROOT = settings.data_dir / "managed"
 def managed_runtime_options() -> ManagedRuntimeOptions:
@@ -480,6 +495,7 @@ async def _autostart_runtime() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global _autostart_task
     database.initialize()
     jobs.recover_interrupted()
     # 1枚ごとの記録は別表にあり、親ジョブを倒すだけでは「生成中」のまま残って
@@ -499,11 +515,11 @@ async def lifespan(_: FastAPI):
     mark_queue_lost(jobs, VIDEO_GPU_JOB_KINDS)
     gpu_queue.start()
     # 起動完了を待たずに進める（ComfyUIの読み込みに時間がかかるため）。
-    autostart = asyncio.create_task(_autostart_runtime())
+    _autostart_task = asyncio.create_task(_autostart_runtime())
     try:
         yield
     finally:
-        autostart.cancel()
+        _autostart_task.cancel()
         await gpu_queue.stop()
         await close_progress_watchers()
         # このAPIが起動した専用ComfyUIだけを停止する。外部プロセスには触れない。
@@ -1928,10 +1944,6 @@ async def start_character_figure_edit(
     async def run(job_id: str) -> None:
         uploaded: list[str] = []
         try:
-            # 順番待ちの間に中止されたものは、ComfyUIへ送らずに終える。
-            if jobs.is_cancelled(job_id):
-                edits.fail(edit.id, CANCEL_MESSAGE)
-                return
             template = load_workflow(COMPOSITION_WORKFLOW_PATH)
             client = ComfyClient(base_url)
             references: list[StillImageReference] = []
@@ -2005,6 +2017,8 @@ async def start_character_figure_edit(
             jobs,
             JobCreate(kind="character.figures", payload=payload),
             lambda job_id: partial(run, job_id),
+            # 変更の記録は受け付けた時点で作っている。「変更中」のまま残さない。
+            on_cancelled=partial(edits.fail, edit.id, CANCEL_MESSAGE),
         )
     except Exception:
         # 頼めなかった変更を「変更中」のまま残さない。
@@ -3078,9 +3092,6 @@ async def make_still_image_pose(
             return {"still_image_id": still_image_id, "character_id": character_id}
 
         try:
-            # 順番待ちの間に中止されたものは、ComfyUIへ送らずに終える。
-            if jobs.is_cancelled(job_id):
-                return
             comfy_figure = await _upload_local_image(
                 client, figure_path, f"{job_id}-figure", uploaded
             )

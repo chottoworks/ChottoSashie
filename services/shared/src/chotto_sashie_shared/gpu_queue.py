@@ -6,14 +6,16 @@
 前の処理が終わったら次を自動で始める。
 
 順番はジョブの作成順（`queued` のまま待つ）で、実行はこのプロセス内の worker が
-一件ずつ取り出して行う。API再起動をまたぐと待ち行列の実行予定は失われるため、
-起動時に `queued` のまま残ったジョブは中断として扱う（`JobRepository` 側）。
+一件ずつ取り出して行う。順番が来ても、生成エンジンの起動が進んでいる間は応答する
+までそのまま待たせる（`wait_until_ready`）。API再起動をまたぐと待ち行列の実行予定は
+失われるため、起動時に `queued` のまま残ったジョブは中断として扱う（`JobRepository` 側）。
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 
 from .jobs import JobCreate, JobRead, JobRepository, JobTransition
 
@@ -21,16 +23,31 @@ from .jobs import JobCreate, JobRead, JobRepository, JobTransition
 JobRunner = Callable[[], Awaitable[None]]
 
 
+@dataclass(frozen=True)
+class _QueuedJob:
+    job_id: str
+    repository: JobRepository
+    runner: JobRunner
+    on_cancelled: Callable[[], None] | None
+
+
 class GpuQueue:
     """GPUを使うジョブを作成し、一件ずつ順に実行する唯一の入口。
 
     `submit` はジョブを作って待ち行列へ積み、すぐ返る。呼び出し側は
     ジョブIDを使って進み具合を見る（待っている間は `queued` のまま）。
+    `wait_until_ready` はジョブIDを受け取り、そのジョブを始めてよくなるまで待つ。
+    中止されたジョブでは待つのをやめて返すこと。
     """
 
-    def __init__(self, job_kinds: Sequence[str]) -> None:
+    def __init__(
+        self,
+        job_kinds: Sequence[str],
+        wait_until_ready: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
         self._job_kinds = tuple(job_kinds)
-        self._pending: asyncio.Queue[tuple[str, JobRunner]] | None = None
+        self._wait_until_ready = wait_until_ready
+        self._pending: asyncio.Queue[_QueuedJob] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._worker: asyncio.Task | None = None
         self._running_job_id: str | None = None
@@ -39,7 +56,7 @@ class GpuQueue:
     def job_kinds(self) -> tuple[str, ...]:
         return self._job_kinds
 
-    def _ensure_queue(self) -> asyncio.Queue[tuple[str, JobRunner]]:
+    def _ensure_queue(self) -> asyncio.Queue[_QueuedJob]:
         """いま動いているイベントループに紐づく待ち行列を返す。
 
         待ち行列とタスクはループに紐づく。モジュール読み込み時に作ると、別の
@@ -70,16 +87,23 @@ class GpuQueue:
                 pass
 
     async def submit(
-        self, repository: JobRepository, request: JobCreate, runner_factory: Callable[[str], JobRunner]
+        self,
+        repository: JobRepository,
+        request: JobCreate,
+        runner_factory: Callable[[str], JobRunner],
+        *,
+        on_cancelled: Callable[[], None] | None = None,
     ) -> JobRead:
         """ジョブを作って順番待ちへ積む。作成と登録は不可分に行う。
 
         `runner_factory` はジョブIDを受け取り、実行本体を返す。ジョブを作ってから
         実行本体を組み立てるため、順番が確定してからでないと作れない情報も渡せる。
+        順番待ちの間に中止されたジョブの実行本体は呼ばない。受け付けた時点で作った
+        記録の後始末が要るときは `on_cancelled` で渡す。
         """
         pending = self._ensure_queue()
         job = repository.create(request)
-        pending.put_nowait((job.id, runner_factory(job.id)))
+        pending.put_nowait(_QueuedJob(job.id, repository, runner_factory(job.id), on_cancelled))
         self.start()
         return job
 
@@ -95,14 +119,21 @@ class GpuQueue:
     async def _run_forever(self) -> None:
         pending = self._ensure_queue()
         while True:
-            job_id, runner = await pending.get()
-            self._running_job_id = job_id
+            job = await pending.get()
+            self._running_job_id = job.job_id
             try:
-                await runner()
+                if self._wait_until_ready is not None:
+                    await self._wait_until_ready(job.job_id)
+                # 順番待ちの間に中止されたものは、ComfyUIへ送らずに終える。
+                if job.repository.is_cancelled(job.job_id):
+                    if job.on_cancelled is not None:
+                        job.on_cancelled()
+                    continue
+                await job.runner()
             except asyncio.CancelledError:
                 raise
             except Exception as error:  # noqa: BLE001 - 一件の失敗で待ち行列を止めない
-                print(f"[gpu-queue] ジョブ {job_id} が失敗しました: {error}")
+                print(f"[gpu-queue] ジョブ {job.job_id} が失敗しました: {error}")
             finally:
                 self._running_job_id = None
                 pending.task_done()

@@ -89,6 +89,87 @@ def test_submit_does_not_reject_while_busy(tmp_path: Path) -> None:
     assert asyncio.run(scenario()) == "queued"
 
 
+def test_job_waits_until_engine_is_ready(tmp_path: Path) -> None:
+    """順番が来ても、準備ができるまでは queued のまま始めない。"""
+    repository = _repository(tmp_path)
+    started: list[str] = []
+
+    async def scenario() -> tuple[str, list[str]]:
+        engine_ready = asyncio.Event()
+
+        async def wait_until_ready(_job_id: str) -> None:
+            await engine_ready.wait()
+
+        async def run() -> None:
+            started.append("run")
+
+        queue = GpuQueue(_KINDS, wait_until_ready=wait_until_ready)
+        job = await queue.submit(
+            repository, JobCreate(kind="generation.asset", payload={}), lambda _id: run
+        )
+        await asyncio.sleep(0.02)
+        state_while_waiting = repository.get(job.id).state.value
+        started_while_waiting = list(started)
+        engine_ready.set()
+        for _ in range(50):
+            if started:
+                break
+            await asyncio.sleep(0.01)
+        await queue.stop()
+        return state_while_waiting, started_while_waiting
+
+    state_while_waiting, started_while_waiting = asyncio.run(scenario())
+
+    assert state_while_waiting == "queued"
+    assert started_while_waiting == []
+    assert started == ["run"]
+
+
+def test_job_cancelled_while_waiting_is_not_run(tmp_path: Path) -> None:
+    """待っている間に中止されたものは実行本体を呼ばず、後始末だけして次へ進む。"""
+    repository = _repository(tmp_path)
+    started: list[str] = []
+    cleaned_up: list[str] = []
+
+    async def scenario() -> None:
+        engine_ready = asyncio.Event()
+
+        async def wait_until_ready(_job_id: str) -> None:
+            await engine_ready.wait()
+
+        def make_runner(name: str):
+            async def run() -> None:
+                started.append(name)
+
+            return run
+
+        queue = GpuQueue(_KINDS, wait_until_ready=wait_until_ready)
+        cancelled = await queue.submit(
+            repository,
+            JobCreate(kind="generation.asset", payload={}),
+            lambda _id: make_runner("cancelled"),
+            on_cancelled=lambda: cleaned_up.append("cancelled"),
+        )
+        await queue.submit(
+            repository,
+            JobCreate(kind="generation.asset", payload={}),
+            lambda _id: make_runner("next"),
+        )
+        await asyncio.sleep(0.02)
+        repository.request_cancel(cancelled.id)
+        engine_ready.set()
+        for _ in range(50):
+            if started:
+                break
+            await asyncio.sleep(0.01)
+        await queue.stop()
+
+    asyncio.run(scenario())
+
+    assert started == ["next"]
+    assert cleaned_up == ["cancelled"]
+
+
 def test_waiting_ahead_counts_the_running_job(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     queue = GpuQueue(_KINDS)

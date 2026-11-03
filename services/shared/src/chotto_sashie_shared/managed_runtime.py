@@ -7,6 +7,7 @@ managed_* モードでは ComfyUI をアプリが用意・起動する。アプ�
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -135,3 +136,31 @@ async def autostart_managed_comfyui(
     except (ManagedRuntimeUnavailableError, ManagedConfigError, RuntimeManagerError) as error:
         return f"生成エンジンの自動起動を見送りました: {error}"
     return str(status.get("message") or "生成エンジンを自動起動しました")
+
+
+async def wait_while_managed_comfyui_starts(
+    config: SetupConfigRead,
+    runtime_manager: RuntimeManager,
+    *,
+    autostart_pending: Callable[[], bool],
+    should_stop: Callable[[], bool],
+    poll_seconds: float = 1.0,
+) -> None:
+    """専用ComfyUIの起動が進んでいる間、応答するまで待つ。
+
+    起動が進んでいないとき（既存ComfyUIモード、止まったまま、起動に失敗した）は
+    待っても応答しないのですぐ返し、つながらない理由は生成側で伝える。
+    `autostart_pending` は、自動起動がプロセスを立ち上げる前の段階（前のプロセスが
+    ポートを手放すのを待っている間など）も起動中として数えるために受け取る。
+    起動中の状態は `RuntimeManager.start` の上限で必ず終わるので、ここに上限は設けない。
+    """
+    if not config.configured or config.mode == SetupMode.EXISTING_COMFYUI:
+        return
+    while not should_stop():
+        # 起動処理がプロセスを立ち上げ終えるまでは待たされるので、APIを塞がない。
+        owned = await asyncio.to_thread(runtime_manager.owns_running_process)
+        if not owned and not autostart_pending():
+            return
+        if await asyncio.to_thread(comfy_is_ready, config.resolved_base_url):
+            return
+        await asyncio.sleep(poll_seconds)

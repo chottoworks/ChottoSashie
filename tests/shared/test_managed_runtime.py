@@ -19,6 +19,7 @@ from chotto_sashie_shared.managed_runtime import (
     ManagedRuntimeUnavailableError,
     autostart_managed_comfyui,
     start_managed_comfyui,
+    wait_while_managed_comfyui_starts,
 )
 from chotto_sashie_shared.runtime import RuntimeManager, RuntimeManagerError, comfy_is_ready
 from chotto_sashie_shared.setup_config import (
@@ -337,3 +338,97 @@ def test_broken_reuse_falls_back_to_dedicated(tmp_path: Path) -> None:
     resolved = resolve_comfyui_install(str(tmp_path / "gone"), sys.executable)
     assert resolved is not None
     assert resolved[0] == managed_comfyui_paths(comfyui_root)[0]
+
+
+class _FakeRuntime:
+    """起動の途中経過を順に返す代役。(プロセスが動いているか, 応答するか) の並び。"""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, *steps: tuple[bool, bool]) -> None:
+        self._steps = list(steps)
+        self._index = -1
+        self.probes = 0
+        monkeypatch.setattr(
+            "chotto_sashie_shared.managed_runtime.comfy_is_ready", self._comfy_is_ready
+        )
+
+    def owns_running_process(self) -> bool:
+        self._index = min(self._index + 1, len(self._steps) - 1)
+        return self._steps[self._index][0]
+
+    def _comfy_is_ready(self, _base_url: str) -> bool:
+        self.probes += 1
+        return self._steps[self._index][1]
+
+
+def _managed_config(tmp_path: Path):
+    return _repository(tmp_path).set(
+        SetupConfigUpdate(mode=SetupMode.MANAGED_DEDICATED, port=_free_port())
+    )
+
+
+def _wait(config, runtime, *, autostart_pending=lambda: False, should_stop=lambda: False) -> None:
+    asyncio.run(
+        wait_while_managed_comfyui_starts(
+            config,
+            runtime,
+            autostart_pending=autostart_pending,
+            should_stop=should_stop,
+            poll_seconds=0,
+        )
+    )
+
+
+def test_wait_continues_until_starting_comfyui_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _FakeRuntime(monkeypatch, (True, False), (True, False), (True, True))
+    _wait(_managed_config(tmp_path), runtime)
+    assert runtime.probes == 3
+
+
+def test_wait_counts_autostart_before_the_process_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """自動起動がプロセスを立ち上げる前は、まだ何も動いていないが待たせる。"""
+    runtime = _FakeRuntime(monkeypatch, (False, False), (True, False), (True, True))
+    pending = iter([True])
+    _wait(_managed_config(tmp_path), runtime, autostart_pending=lambda: next(pending, False))
+    assert runtime.probes == 3
+
+
+def test_wait_returns_when_startup_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """起動に失敗して止まったら、待ち続けずに生成側へ任せる。"""
+    runtime = _FakeRuntime(monkeypatch, (True, False), (False, False))
+    _wait(_managed_config(tmp_path), runtime)
+    assert runtime.probes == 1
+
+
+def test_wait_does_not_probe_when_nothing_is_starting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _FakeRuntime(monkeypatch, (False, False))
+    _wait(_managed_config(tmp_path), runtime)
+    assert runtime.probes == 0
+
+
+def test_wait_stops_when_the_job_is_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _FakeRuntime(monkeypatch, (True, False))
+    stops = iter([False, True])
+    _wait(_managed_config(tmp_path), runtime, should_stop=lambda: next(stops))
+    assert runtime.probes == 1
+
+
+def test_wait_skips_existing_comfyui_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """既存ComfyUIはアプリが起動しないので、待っても応答するとは限らない。"""
+    config = _repository(tmp_path).set(
+        SetupConfigUpdate(mode=SetupMode.EXISTING_COMFYUI, base_url="http://127.0.0.1:8190")
+    )
+    runtime = _FakeRuntime(monkeypatch, (True, False))
+    _wait(config, runtime)
+    assert runtime.probes == 0
