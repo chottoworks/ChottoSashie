@@ -251,7 +251,7 @@ from .image_files import (
 from .hardware import load_profiles, probe_hardware, recommend
 from .preferences import PreferenceRepository, PreferencesRead, PreferencesUpdate
 from .projects import ProjectNotFoundError, ProjectRepository
-from .requirements import check_requirements, load_requirements
+from .requirements import check_requirements, load_requirements, setting_models_present
 from .setup_config import SetupConfigError, SetupConfigRepository
 from .still_image_characters import StillImageCharacterRepository
 from .still_images import StillImageNotFoundError, StillImageReferenceError, StillImageRepository
@@ -348,6 +348,7 @@ from .schemas import (
     ENGINE_VIDEO_FORMATS,
     SetupConfigUpdate,
     SetupMode,
+    ModelChoiceStatus,
     SetupStatus,
     StillImageCreate,
     StillImageDeletionPreview,
@@ -1080,22 +1081,17 @@ def _download_groups_for_setup() -> list:
     return [group for group in groups if not group.video_only]
 
 
-@app.get("/api/v1/setup/models/plan")
-async def get_models_plan() -> dict:
-    """必要なモデルの取得計画（既存/不足/必要容量/取得先）を返す。
+def _quick_setup_plan(specs: list, default_groups: set[str]) -> tuple[ModelStorage, dict]:
+    """画面から即座に返すための取得計画と、その取得先。
 
-    既定で取得するのは、本体一式と、いま使う設定（選んでいなければ、この端末への
-    おすすめ）に当たるまとまり。ほかの選択肢のまとまりは任意として載せる。
+    外部ファイルはサイズ一致までの高速判定にする。実際に取得を省くかどうかは
+    取得ジョブでSHA-256まで照合して決める。
     """
-    specs = _download_specs_for_setup()
-    default_groups = await _default_download_groups()
     external = configured_external_model_files()
     try:
         storage = model_storage()
     except ModelStorageError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    # 画面から即座に返すため、外部ファイルはサイズ一致までの高速判定にする。
-    # 実際に取得を省くかどうかは取得ジョブでSHA-256まで照合して決める。
     plan = build_setup_plan(
         storage.root,
         specs,
@@ -1104,6 +1100,58 @@ async def get_models_plan() -> dict:
         verify_external_hashes=False,
         default_groups=default_groups,
     )
+    # 参照フォルダの指定が正しいか画面で分かるよう、走査できた件数も返す。
+    plan["external_candidate_files"] = len(external)
+    return storage, plan
+
+
+@app.get("/api/v1/setup/models/choice", response_model=ModelChoiceStatus)
+async def get_model_choice_status(
+    setting_key: str = Query(), setting_value: str = Query()
+) -> ModelChoiceStatus:
+    """設定の1つの選択肢（例: 動画の作り方の MiniMax H3）のモデルが揃っているか。
+
+    取得と確認に使うのと同じ判定で答える。既存ComfyUIをそのまま使う設定では、モデルの
+    置き場所をこのアプリは知らないのでComfyUIに聞く。それ以外は手元のファイルで答えるので、
+    専用ComfyUIが止まっていても答えられる。
+    """
+    group = next(
+        (
+            group
+            for group in load_download_groups(MODELS_MANIFEST_PATH)
+            if group.setting_key == setting_key and group.setting_value == setting_value
+        ),
+        None,
+    )
+    if group is None:
+        raise HTTPException(status_code=404, detail="この設定の選択肢に結び付いたモデルはありません")
+    if SetupConfigRepository(database).get().mode == SetupMode.EXISTING_COMFYUI:
+        try:
+            object_info = await ComfyClient(_resolve_base_url(None)).object_info()
+        except ComfyConnectionError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        available = setting_models_present(
+            object_info, load_requirements(REQUIREMENTS_MANIFEST_PATH), setting_key, setting_value
+        )
+        return ModelChoiceStatus(available=available, can_download=False)
+    specs = [spec for spec in load_download_specs(MODELS_MANIFEST_PATH) if spec.group == group.id]
+    # 参照フォルダの走査を待つ間、生成の進捗など他の応答を止めない。
+    _, plan = await asyncio.to_thread(_quick_setup_plan, specs, {group.id})
+    available = all(
+        component["state"] in {"ready", "external_ready"} for component in plan["components"]
+    )
+    return ModelChoiceStatus(available=available, can_download=True)
+
+
+@app.get("/api/v1/setup/models/plan")
+async def get_models_plan() -> dict:
+    """必要なモデルの取得計画（既存/不足/必要容量/取得先）を返す。
+
+    既定で取得するのは、本体一式と、いま使う設定（選んでいなければ、この端末への
+    おすすめ）に当たるまとまり。ほかの選択肢のまとまりは任意として載せる。
+    """
+    default_groups = await _default_download_groups()
+    storage, plan = _quick_setup_plan(_download_specs_for_setup(), default_groups)
     # まとまりごとの名前と、既定で取得するか（画面で「追加で取得できるもの」を並べる）。
     plan["groups"] = [
         {
@@ -1116,8 +1164,6 @@ async def get_models_plan() -> dict:
         }
         for group in _download_groups_for_setup()
     ]
-    # 参照フォルダの指定が正しいか画面で分かるよう、走査できた件数も返す。
-    plan["external_candidate_files"] = len(external)
     plan["download_target"] = storage.target
     plan["download_root"] = str(storage.root)
     plan["download_label"] = storage.label

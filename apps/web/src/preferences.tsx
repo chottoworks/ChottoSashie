@@ -95,22 +95,43 @@ export function useRememberedSetting<K extends keyof api.Preferences>(
   return [preferences[key], setValue];
 }
 
+/** 選んだ選択肢のモデルが揃っていないときの注意。揃っていれば null。 */
+export function missingModelNote(status: api.ModelChoiceStatus, label: string): string | null {
+  if (status.available) return null;
+  return status.can_download
+    ? `「${label}」のモデルをまだ取得していません。セットアップの「モデルの取得」から取得してください。`
+    : `「${label}」のモデルが接続先のComfyUIにありません。既存ComfyUIのmodelsフォルダへ配置してください。`;
+}
+
 /**
- * 使うモデルが変わる設定で、おすすめ以外を選んでいるときの注意。おすすめどおりなら null。
+ * 使うモデルが変わる設定で、選んでいる選択肢のモデルが揃っていないときの注意。
  *
- * モデルはおすすめ（選んだ設定があればその設定）に合わせて取得するため、ほかの選択肢の
- * モデルは取得していないことがある。生成して初めて気づくことのないよう、選んだ時点で伝える。
+ * モデルは選択肢ごとに取得するので、選んだ選択肢のモデルが無いことがある。生成して初めて
+ * 気づくことのないよう、選んだ時点で実際の有無を確かめて伝える。確かめられないとき
+ * （ComfyUIに接続できないなど）は、無いと言い切れないので何も出さない。
  */
-export function useOffRecommendationNote<K extends keyof api.Preferences>(
+export function useMissingModelNote<K extends keyof api.Preferences>(
   key: K,
   labels: Record<string, string>,
 ): string | null {
-  const { preferences } = usePreferences();
-  const recommended = preferences.recommended[key];
-  if (recommended === undefined || String(preferences[key]) === recommended) return null;
-  return (
-    `おすすめの「${labels[recommended] ?? recommended}」以外を選んでいます。`
-    + "モデルの追加取得が必要になる場合があります。"
-    + "取得していなければ、セットアップの「モデルの取得」にある「ほかの設定で使うモデル」から取得してください。"
-  );
+  const { preferences, loaded } = usePreferences();
+  const value = String(preferences[key]);
+  const [status, setStatus] = useState<api.ModelChoiceStatus | null>(null);
+
+  useEffect(() => {
+    if (!loaded) return;
+    let stale = false;
+    setStatus(null);
+    api.getModelChoiceStatus(key, value).then(
+      (next) => {
+        if (!stale) setStatus(next);
+      },
+      () => undefined,
+    );
+    return () => {
+      stale = true;
+    };
+  }, [key, value, loaded]);
+
+  return status && missingModelNote(status, labels[value] ?? value);
 }

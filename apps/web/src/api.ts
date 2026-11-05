@@ -880,6 +880,17 @@ export const stopRuntime = () =>
 export const getRuntimeStatus = () =>
   apiGet<ManagedRuntimeStatus>("/api/v1/setup/runtime/status", "起動状態を取得できませんでした");
 export const getModelPlan = () => apiGet<ModelPlan>("/api/v1/setup/models/plan", "モデル計画を取得できませんでした");
+/** 設定の1つの選択肢で使うモデルが揃っているか。 */
+export interface ModelChoiceStatus {
+  available: boolean;
+  /** このアプリから取得できるか（既存ComfyUIをそのまま使う設定では、利用者が配置する）。 */
+  can_download: boolean;
+}
+export const getModelChoiceStatus = (settingKey: string, settingValue: string) =>
+  apiGet<ModelChoiceStatus>(
+    `/api/v1/setup/models/choice?setting_key=${encodeURIComponent(settingKey)}&setting_value=${encodeURIComponent(settingValue)}`,
+    "モデルの有無を確認できませんでした",
+  );
 /** 既定（空）は、本体一式といま使う設定のまとまり。groups でほかのまとまりを、all ですべてを取得する。 */
 export interface ModelDownloadRequest {
   groups?: string[];

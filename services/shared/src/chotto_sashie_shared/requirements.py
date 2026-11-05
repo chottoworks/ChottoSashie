@@ -109,6 +109,21 @@ def _matches_setting(capability: dict[str, Any], settings: dict[str, str]) -> bo
     return settings.get(str(setting.get("key", ""))) == str(setting.get("value", ""))
 
 
+def setting_models_present(
+    object_info: dict[str, Any], manifest: dict[str, Any], key: str, value: str
+) -> bool:
+    """設定の1つの選択肢に結び付いた機能のモデルが、ComfyUIにすべて入っているか。"""
+    capabilities = [
+        capability
+        for capability in manifest.get("capabilities", [])
+        if isinstance(capability, dict)
+        and isinstance(capability.get("setting"), dict)
+        and _matches_setting(capability, {key: value})
+    ]
+    report = check_requirements(object_info, {"capabilities": capabilities})
+    return all(model.present for capability in report.capabilities for model in capability.models)
+
+
 def check_requirements(
     object_info: dict[str, Any],
     manifest: dict[str, Any],

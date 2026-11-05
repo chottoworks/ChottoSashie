@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -243,3 +244,59 @@ def test_chosen_setting_overrides_recommendation(
     # 任意のぶんは「必要なダウンロード」に含めない。
     assert body["required_download_bytes"] == 3 + 5
     assert body["all_download_bytes"] == 3 + 5 + 7
+
+
+def _choice_status(client: TestClient, value: str) -> dict:
+    response = client.get(
+        "/api/v1/setup/models/choice",
+        params={"setting_key": "video_engine", "setting_value": value},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_choice_status_tells_whether_models_are_present(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """選択肢のモデルの有無は、実際のファイルで答える。"""
+    monkeypatch.setattr(main, "MODELS_MANIFEST_PATH", _manifest_with_choices(tmp_path))
+    _record_downloads(monkeypatch)
+    assert client.put("/api/v1/setup/config", json={"mode": "managed_dedicated"}).status_code == 200
+    assert client.put("/api/v1/preferences", json={"video_engine": "minimax_h3"}).status_code == 200
+
+    assert _choice_status(client, "minimax_h3") == {"available": False, "can_download": True}
+
+    assert client.post("/api/v1/setup/models/download", json={"groups": ["minimax_h3"]}).status_code == 200
+
+    assert _choice_status(client, "minimax_h3") == {"available": True, "can_download": True}
+    # 別の選択肢のモデルは、取得したことにならない。
+    assert _choice_status(client, "wan22")["available"] is False
+
+
+def test_choice_status_counts_models_in_other_folders(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """取得計画と同じく、別のモデルフォルダにあるものも揃っているものとして数える。"""
+    monkeypatch.setattr(main, "MODELS_MANIFEST_PATH", _manifest_with_choices(tmp_path))
+    assert client.put("/api/v1/setup/config", json={"mode": "managed_dedicated"}).status_code == 200
+    other = tmp_path / "other-models"
+    placed = other / "vae" / "h3-one.safetensors"
+    placed.parent.mkdir(parents=True)
+    placed.write_bytes(b"x" * 7)
+    storage = main.model_storage()
+    monkeypatch.setattr(
+        main,
+        "model_storage",
+        lambda: replace(storage, managed_roots=[*storage.managed_roots, other]),
+    )
+
+    assert _choice_status(client, "minimax_h3")["available"] is True
+    assert _choice_status(client, "wan22")["available"] is False
+
+
+def test_choice_status_rejects_setting_without_models(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/setup/models/choice",
+        params={"setting_key": "video_engine", "setting_value": "unknown"},
+    )
+    assert response.status_code == 404

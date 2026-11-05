@@ -870,6 +870,14 @@ class SetupStatus(BaseModel):
     data_dir: str = ""
 
 
+class ModelChoiceStatus(BaseModel):
+    """設定の1つの選択肢で使うモデルが、いまの環境に揃っているか。"""
+
+    available: bool
+    # このアプリから取得できるか（既存ComfyUIをそのまま使う設定では、利用者が配置する）。
+    can_download: bool
+
+
 class HardwareReport(BaseModel):
     """この端末の構成と、それに合わせた既定値の提案。
 

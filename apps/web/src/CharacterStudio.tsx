@@ -4,7 +4,7 @@ import * as api from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EditableName } from "./EditableName";
 import { CompareLightbox, useLightbox } from "./Lightbox";
-import { useOffRecommendationNote, useRememberedSetting } from "./preferences";
+import { useMissingModelNote, useRememberedSetting } from "./preferences";
 
 /** これ以上進まないジョブの状態。ここに入ったら追いかけるのをやめる。 */
 const TERMINAL_JOB_STATES = new Set(["completed", "failed", "cancelled", "interrupted"]);
@@ -76,7 +76,7 @@ export function CharacterStudio({
   // 枚数・強度は、前回選んだ値から始める（毎回選び直させない）。
   const [candidateCount, setCandidateCount] = useRememberedSetting("candidate_count");
   const [candidatePrecision, setCandidatePrecision] = useRememberedSetting("candidate_precision");
-  const precisionNote = useOffRecommendationNote("candidate_precision", CANDIDATE_PRECISION_LABELS);
+  const precisionNote = useMissingModelNote("candidate_precision", CANDIDATE_PRECISION_LABELS);
   const [variationStrength, setVariationStrength] = useRememberedSetting("variation_strength");
   // 作り直したときに前の回をどうするか（設定で選ぶ。既定は上書き）。
   const [candidateHistory] = useRememberedSetting("candidate_history");

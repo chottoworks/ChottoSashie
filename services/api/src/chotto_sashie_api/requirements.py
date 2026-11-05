@@ -6,6 +6,12 @@ from chotto_sashie_shared.requirements import (
     RequirementToolStatus,
     check_requirements,
     load_requirements,
+    setting_models_present,
 )
 
-__all__ = ["RequirementToolStatus", "check_requirements", "load_requirements"]
+__all__ = [
+    "RequirementToolStatus",
+    "check_requirements",
+    "load_requirements",
+    "setting_models_present",
+]

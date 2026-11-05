@@ -12,6 +12,7 @@ from chotto_sashie_api.requirements import (
     RequirementToolStatus,
     check_requirements,
     load_requirements,
+    setting_models_present,
 )
 
 
@@ -236,3 +237,75 @@ def test_requirements_endpoint_502_when_comfy_unreachable(client: TestClient, mo
 
     response = client.get("/api/v1/setup/requirements", params={"base_url": "http://127.0.0.1:9999"})
     assert response.status_code == 502
+
+
+def test_setting_models_present_looks_only_at_that_choice() -> None:
+    manifest = {
+        "capabilities": [
+            {
+                "id": "common",
+                "models": [{"file": "common.safetensors", "loader": "VAELoader", "input": "vae_name"}],
+            },
+            {
+                "id": "h3",
+                "setting": {"key": "video_engine", "value": "minimax_h3"},
+                "models": [{"file": "h3.safetensors", "loader": "VAELoader", "input": "vae_name"}],
+            },
+            {
+                "id": "wan",
+                "setting": {"key": "video_engine", "value": "wan22"},
+                "models": [{"file": "wan.safetensors", "loader": "VAELoader", "input": "vae_name"}],
+            },
+        ]
+    }
+    object_info = _object_info(
+        nodes={"VAELoader"},
+        files_by_loader={"VAELoader": {"vae_name": ["h3.safetensors"]}},
+    )
+
+    assert setting_models_present(object_info, manifest, "video_engine", "minimax_h3") is True
+    assert setting_models_present(object_info, manifest, "video_engine", "wan22") is False
+
+
+def test_choice_status_asks_comfyui_when_using_existing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "video-api.sqlite3")
+    monkeypatch.setattr(main, "database", database)
+    monkeypatch.setattr(main, "jobs", JobRepository(database))
+    manifest = tmp_path / "requirements.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "capabilities": [
+                    {
+                        "id": "h3",
+                        "setting": {"key": "video_engine", "value": "minimax_h3"},
+                        "models": [{"file": "h3.safetensors", "loader": "VAELoader", "input": "vae_name"}],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "REQUIREMENTS_MANIFEST_PATH", manifest)
+
+    async def fake_object_info(self) -> dict:
+        return _object_info(
+            nodes={"VAELoader"},
+            files_by_loader={"VAELoader": {"vae_name": ["h3.safetensors"]}},
+        )
+
+    monkeypatch.setattr(main.ComfyClient, "object_info", fake_object_info)
+    with TestClient(main.app) as client:
+        assert client.put(
+            "/api/v1/setup/config",
+            json={"mode": "existing_comfyui", "base_url": "http://127.0.0.1:8190"},
+        ).status_code == 200
+        response = client.get(
+            "/api/v1/setup/models/choice",
+            params={"setting_key": "video_engine", "setting_value": "minimax_h3"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"available": True, "can_download": False}

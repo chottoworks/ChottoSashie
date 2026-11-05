@@ -12,7 +12,7 @@ import { useLightbox } from "./Lightbox";
 import { PortraitCropper } from "./PortraitCropper";
 import { formatBytes, safeFileName } from "./format";
 import { chosenFigureId, withChosenFigure } from "./stillImageFigure";
-import { useOffRecommendationNote, usePreferences, useRememberedSetting } from "./preferences";
+import { useMissingModelNote, usePreferences, useRememberedSetting } from "./preferences";
 import { stillImageUsageItems, useDeletion } from "./useDeletion";
 
 function useJobRunner() {
@@ -5175,7 +5175,7 @@ function SceneCutsCard({
   // 動画生成に使うモデル。選び直すとそれが次回からの既定になる
   // （H3で作ると決めた人に、毎回選び直させない）。
   const [engine, setEngine] = useRememberedSetting("video_engine");
-  const engineNote = useOffRecommendationNote(
+  const engineNote = useMissingModelNote(
     "video_engine",
     Object.fromEntries(api.VIDEO_ENGINES.map((option) => [option.id, option.label])),
   );
