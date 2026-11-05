@@ -102,6 +102,9 @@ def build_pose_prompt(spec: StillImageCharacterSpec) -> str:
     同じ種）では、「背景を薄いグレーに」「写真の参照は写真のまま…」と書き、作品全体の
     画風を足すと、イラストの立ち絵が3DCG寄りの絵柄と明るい肌に描き直され、頼んでいない
     棒や荷物も足された。保つものとして書くと、絵柄・肌の色・背景が保たれた。
+
+    画風は、保つものとしても名指ししない。「art style, line work」と描線を言うと、写真風の
+    立ち絵が線画やスケッチになる（素足のスカート姿で、座る・歩くのどちらでも実測）。
     """
     instruction = person_instruction(
         pose=spec.pose, direction=spec.direction, expression=spec.expression, notes=spec.notes
@@ -115,9 +118,8 @@ def build_pose_prompt(spec: StillImageCharacterSpec) -> str:
         "following the instruction above. Do not add any items.",
         "Everything else stays exactly as in image 1: the face, hairstyle, hair color, skin "
         "tone, eye color, body shape, outfit, accessories and the items they carry, the whole "
-        "body from the top of the head down to both shoes inside the frame, the plain "
-        "background with no scenery and no props on the floor, and the art style, line work, "
-        "coloring and shading.",
+        "body from the top of the head down to both shoes inside the frame, and the plain "
+        "background with no scenery and no props on the floor.",
         "The person appears only once. Do not add anyone else, and do not duplicate or "
         "repeat them.",
     ]

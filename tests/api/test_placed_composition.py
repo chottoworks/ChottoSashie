@@ -61,9 +61,12 @@ def test_pose_prompt_carries_the_spec_and_keeps_the_figure_rules() -> None:
     # （背景の色や写真・イラストを描く対象として書くと、絵全体が描き直される）
     assert "from the top of the head down to both shoes" in prompt
     assert "the plain background" in prompt
-    assert "the art style, line work, coloring and shading" in prompt
+    assert "Everything else stays exactly as in image 1" in prompt
     assert "light-gray" not in prompt
     assert "photographic" not in prompt
+    # 画風は名指ししない（描線を言うと、写真風の立ち絵が線画になる）。
+    assert "art style" not in prompt
+    assert "line work" not in prompt
     assert "The person appears only once." in prompt
     # 作品全体の画風は足さない（元の立ち絵の画風が手本になる）。
     assert "作品全体の画風" not in prompt

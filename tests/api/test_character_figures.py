@@ -703,7 +703,7 @@ def test_replacing_the_default_figure_changes_the_portrait_version(
 def test_edit_prompt_keeps_the_figure_conditions(
     client: TestClient, fake_comfy: dict[str, list]
 ) -> None:
-    """変えるのは衣装・持ち物だけで、立ち絵の条件（全身・素背景・1人）と画風は元のまま保たせる。"""
+    """変えるのは衣装・持ち物だけで、立ち絵の条件（全身・素背景・1人）を含めほかは元のまま保たせる。"""
     project_id, character_id = _character(client)
     figure = _uploaded_figure(client, character_id)
     prop_id = _prop_with_image(client, project_id)
@@ -728,9 +728,12 @@ def test_edit_prompt_keeps_the_figure_conditions(
     # （背景の色や写真・イラストを描く対象として書くと、絵全体が描き直される）
     assert "from the top of the head down to both shoes" in prompt
     assert "the plain background" in prompt
-    assert "the art style, line work, coloring and shading" in prompt
+    assert "Everything else stays exactly as in image 1" in prompt
     assert "light-gray" not in prompt
     assert "photographic" not in prompt
+    # 画風は名指ししない（描線を言うと、新しく描く部分に輪郭線が入る）。
+    assert "art style" not in prompt
+    assert "line work" not in prompt
     assert "The person appears only once." in prompt
     # 作品全体の画風は足さない（元の立ち絵の画風が手本になる）。
     assert "作品全体の画風" not in prompt

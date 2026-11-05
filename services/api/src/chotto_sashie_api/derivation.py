@@ -56,6 +56,12 @@ def build_figure_variation_prompt(instruction: str, prop_count: int) -> str:
     元の立ち絵は全身・素背景・1人の条件を満たしているので、それを保てと言えば
     条件も保たれる（頭から靴までの枠も、保つものとして挙げる）。
 
+    **画風は、保つものとしても名指ししない。** 「Everything else stays exactly as in
+    image 1」で保たれる。「art style, line work」のように描線を言うと、写真風の立ち絵でも
+    新しく描く部分（脚や靴）に輪郭線とハッチングが入り、水彩では硬い線とべた塗りになる。
+    実機（同じ立ち絵・同じ種）では、語を外すと写真風は写真のまま、線画アニメ調・水彩・
+    ペン画もそれぞれの絵柄のままだった。
+
     持ち物は、小物を渡したか、利用者が指示に書いたときだけ変える。「持ち物も変えてよい」
     とだけ書くと、スーツに鞄のように、頼んでいない物を持たせる。
 
@@ -88,8 +94,7 @@ def build_figure_variation_prompt(instruction: str, prop_count: int) -> str:
     lines.append(
         "Everything else stays exactly as in image 1: the face, hairstyle, hair color, "
         "skin tone, eye color, body shape, pose, the framing from the top of the head down "
-        "to both shoes, the plain background, and the art style, line work, coloring and "
-        "shading."
+        "to both shoes, and the plain background."
     )
     lines.append(
         "The person appears only once. Do not add anyone else, and do not duplicate or "
