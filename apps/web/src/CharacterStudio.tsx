@@ -385,6 +385,7 @@ export function CharacterStudio({
     await guarded("figure-edit-save", async () => {
       await api.saveCharacterFigureEdit(edit.id);
       setCompareTarget(null);
+      setEditTargetId(null);
       setNotice("立ち絵を変更後の画像に置き換えました");
       await reloadImages(candidateBatchId);
       await onChanged();
@@ -399,6 +400,7 @@ export function CharacterStudio({
         prop_asset_ids: edit.prop_asset_ids,
       });
       setCompareTarget(null);
+      setEditTargetId(null);
       setNotice("同じ指示で作り直しています。出来上がったら、その立ち絵のところで確かめます");
       await reloadImages(candidateBatchId);
     });
@@ -1153,6 +1155,21 @@ export function CharacterStudio({
                           変えません（姿勢は静止画を作るときに指定します）。出来上がりを見て採用すると、
                           この立ち絵が置き換わります。元も残したいときは、先に「複製」してください。
                         </p>
+                        {edit?.state === "completed" && edit.url && (
+                          <>
+                            {/* どこを直したいのかを見ながら書けるよう、いまの結果を出しておく。 */}
+                            <img
+                              className="vs-figure-edit-image vs-zoomable"
+                              src={editSrc(edit)}
+                              alt="いまの変更の結果"
+                              title="元の立ち絵と並べて拡大します"
+                              onClick={() => setCompareTarget({ figure, label: figureLabelOf(figure), edit })}
+                            />
+                            <p className="vs-muted">
+                              変更し直すと、いまの結果は破棄され、元の立ち絵からもう一度作ります。
+                            </p>
+                          </>
+                        )}
                         <div className="vs-field">
                           <label>変えたいこと</label>
                           <input
@@ -1191,11 +1208,6 @@ export function CharacterStudio({
                             })}
                           </div>
                         </div>
-                        {edit !== null && (
-                          <p className="vs-muted">
-                            まだ採用していない変更の結果は、変更し直すと破棄されます。
-                          </p>
-                        )}
                         <div className="vs-state-actions">
                           <button
                             className="vs-btn"
@@ -1300,6 +1312,14 @@ export function CharacterStudio({
                                 title="同じ指示でもう一度作ります"
                               >
                                 {busy === "figure-edit" ? "開始しています…" : "再生成する"}
+                              </button>
+                              <button
+                                className="vs-btn ghost"
+                                disabled={busy !== null}
+                                onClick={() => openEdit(figure)}
+                                title="変えたいことを書き直して、もう一度作ります"
+                              >
+                                指示を直す
                               </button>
                               <button
                                 className="vs-btn ghost"
@@ -1436,6 +1456,16 @@ export function CharacterStudio({
                 onClick={() => void regenerateEdit(compareTarget.figure, compareTarget.edit)}
               >
                 再生成する
+              </button>
+              <button
+                className="vs-btn ghost"
+                disabled={busy !== null}
+                onClick={() => {
+                  openEdit(compareTarget.figure);
+                  setCompareTarget(null);
+                }}
+              >
+                指示を直す
               </button>
             </>
           )}
