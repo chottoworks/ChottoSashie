@@ -189,6 +189,7 @@ from .composition import (
     StillImageReference,
     build_composition_prompt,
     build_composition_workflow,
+    figure_reference,
     resolve_still_image_figure,
     resolve_still_image_sources,
 )
@@ -321,6 +322,7 @@ from .schemas import (
     StillImageCharacterRead,
     StillImageCharacterSpec,
     StillImageCharacterUpdate,
+    StillImageFigureSize,
     StillImagePoseRequest,
     StillImagePoseResult,
     ComfyUIStatus,
@@ -2714,9 +2716,25 @@ async def compose_still_image(
             template = load_workflow(COMPOSITION_WORKFLOW_PATH)
             references: list[StillImageReference] = []
             for index, source in enumerate(sources, start=1):
-                comfy_name = await _upload_local_image(
-                    client, source.image_path, f"{still_image_id}-{index}", uploaded
-                )
+                if source.size is StillImageFigureSize.AS_IS:
+                    comfy_name = await _upload_local_image(
+                        client, source.image_path, f"{still_image_id}-{index}", uploaded
+                    )
+                else:
+                    reference_image = await asyncio.to_thread(
+                        figure_reference,
+                        source.image_path,
+                        source.size,
+                        request.width,
+                        request.height,
+                    )
+                    comfy_name = await _upload_image_bytes(
+                        client,
+                        reference_image,
+                        f"{still_image_id}-{index}.png",
+                        "image/png",
+                        uploaded,
+                    )
                 references.append(
                     StillImageReference(
                         kind=source.kind,
@@ -3040,7 +3058,9 @@ async def make_still_image_pose(
     base_url = _resolve_base_url(request.base_url)
 
     current = record.spec if record is not None else StillImageCharacterSpec()
-    spec = request.spec.posing().model_copy(update={"placement": current.placement})
+    spec = request.spec.posing().model_copy(
+        update={"placement": current.placement, "size": current.size}
+    )
     chosen.upsert(still_image_id, character_id, spec, record.figure_id if record else None)
     prompt = build_pose_prompt(spec)
     seed = request.seed if request.seed is not None else randbelow(9_007_199_254_740_967)

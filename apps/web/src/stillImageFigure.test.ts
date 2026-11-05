@@ -30,7 +30,7 @@ function figure(id: string, overrides: Partial<CharacterFigure> = {}): Character
 const info: StillImageCharacter = {
   character_id: "c1",
   character_name: "人物",
-  spec: { pose: "座る", expression: "", direction: "", placement: "", notes: "" },
+  spec: { pose: "座る", expression: "", direction: "", placement: "", notes: "", size: "as_is" },
   figure_id: "f1",
   figure_is_default: true,
   figure_label: "ラベルf1",

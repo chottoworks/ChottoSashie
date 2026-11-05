@@ -1054,6 +1054,14 @@ class CandidateCleanupResult(BaseModel):
 # --- 静止画ごとの人物の指定 ---
 
 
+class StillImageFigureSize(StrEnum):
+    """指示文で合成するときに渡す立ち絵の縮め方。as_is は立ち絵をそのまま渡す。"""
+
+    AS_IS = "as_is"
+    SMALL = "small"
+    SMALLER = "smaller"
+
+
 class StillImageCharacterSpec(BaseModel):
     """静止画1枚の中での、その人物の指定。
 
@@ -1066,6 +1074,7 @@ class StillImageCharacterSpec(BaseModel):
     direction: str = Field(default="", max_length=2000)
     placement: str = Field(default="", max_length=2000)
     notes: str = Field(default="", max_length=2000)
+    size: StillImageFigureSize = StillImageFigureSize.AS_IS
 
     @field_validator("pose", "expression", "direction", "placement", "notes", mode="before")
     @classmethod
@@ -1073,8 +1082,8 @@ class StillImageCharacterSpec(BaseModel):
         return value.strip() if isinstance(value, str) else ""
 
     def posing(self) -> StillImageCharacterSpec:
-        """姿を作るのに使う分だけ。配置は姿ではなく、置く位置で決める。"""
-        return self.model_copy(update={"placement": ""})
+        """姿を作るのに使う分だけ。配置と大きさは姿ではなく、置く位置で決める。"""
+        return self.model_copy(update={"placement": "", "size": StillImageFigureSize.AS_IS})
 
 
 class StillImageCharacterLayout(BaseModel):

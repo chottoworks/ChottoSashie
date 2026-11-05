@@ -1524,11 +1524,14 @@ export const deleteCandidateBatch = (characterId: string, batchJobId: string) =>
     undefined,
     "候補の履歴を削除できませんでした",
   );
+export type StillImageFigureSize = "as_is" | "small" | "smaller";
+
 export interface StillImageCharacterSpec {
   pose: string;
   expression: string;
   direction: string;
   placement: string;
+  size: StillImageFigureSize;
   notes: string;
 }
 

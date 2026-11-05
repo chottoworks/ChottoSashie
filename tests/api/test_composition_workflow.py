@@ -1,14 +1,18 @@
+import io
 import json
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from chotto_sashie_api.composition import (
     CompositionError,
     StillImageReference,
     build_composition_prompt,
     build_composition_workflow,
+    figure_reference,
 )
+from chotto_sashie_api.schemas import StillImageFigureSize
 
 _TEMPLATE_PATH = Path("workflows/composition/qwen_scene_composition.json")
 
@@ -99,6 +103,37 @@ def test_no_reference_is_rejected() -> None:
 def test_too_many_references_are_rejected() -> None:
     with pytest.raises(CompositionError):
         _bind([StillImageReference(kind="prop", name=f"r{i}", comfy_image=f"{i}.png") for i in range(4)])
+
+
+def _figure_png(path: Path) -> Path:
+    """素背景（薄い灰色）の中央に、濃い色の人物が立つ縦長の立ち絵。"""
+    figure = Image.new("RGB", (300, 400), (200, 200, 200))
+    figure.paste((20, 30, 40), (100, 0, 200, 400))
+    figure.save(path)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("size", "expected_height"),
+    [(StillImageFigureSize.SMALL, 360), (StillImageFigureSize.SMALLER, 216)],
+)
+def test_figure_reference_shrinks_the_figure_on_its_own_background(
+    tmp_path: Path, size: StillImageFigureSize, expected_height: int
+) -> None:
+    """出来上がりと同じ大きさの素背景へ、指定の高さまで縮めて置く。余白は立ち絵の縁の色。"""
+    data = figure_reference(_figure_png(tmp_path / "figure.png"), size, 1280, 720)
+
+    with Image.open(io.BytesIO(data)) as image:
+        rgb = image.convert("RGB")
+    assert rgb.size == (1280, 720)
+    assert rgb.getpixel((0, 0)) == (200, 200, 200)
+    assert rgb.getpixel((1279, 719)) == (200, 200, 200)
+    rows = [y for y in range(720) if rgb.getpixel((640, y))[0] < 100]
+    assert len(rows) == expected_height
+    # 縦横比は保つ（人物の幅は立ち絵の幅の3分の1、立ち絵は 3:4）。
+    middle = rows[len(rows) // 2]
+    dark = [x for x in range(1280) if rgb.getpixel((x, middle))[0] < 100]
+    assert len(dark) == pytest.approx(expected_height * 3 / 4 / 3, abs=2)
 
 
 def test_prompt_refers_to_each_image_the_way_the_model_expects() -> None:

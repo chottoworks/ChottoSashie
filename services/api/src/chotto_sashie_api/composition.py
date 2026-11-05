@@ -8,16 +8,24 @@ Qwen-Image-Edit-2511は複数の参照画像(image1/image2/image3)を受け取�
 従って1枚へ合成できる。ここではワークフローテンプレートの決まった画像スロットへ、
 選ばれた画像を割り当て、使わないスロットは枝刈りする。任意ノードの注入はできず、
 利用者入力は「どの立ち絵と背景を使うか」「人物ごとの指定」「状況の説明文」だけである。
+
+人物の大きさは指示文では動かず、参照画像の中での写り方に従う。小さくしたいときは、立ち絵を
+余白で縮めてから渡す（`figure_reference`）。
 """
 
 from __future__ import annotations
 
+import io
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from chotto_sashie_shared.comfy_client import bind_workflow
+
+from .schemas import StillImageFigureSize
 
 MAX_REFERENCE_IMAGES = 3
 # 1枚に入れられる人物の数。参照画像3枚のうち1枚は背景が使うため、残りが人物の枠になる。
@@ -76,6 +84,7 @@ class StillImageSource:
     expression: str = ""
     direction: str = ""
     notes: str = ""
+    size: StillImageFigureSize = StillImageFigureSize.AS_IS
 
 
 @dataclass(frozen=True)
@@ -224,6 +233,7 @@ def resolve_still_image_sources(database: Any, still_image: Any) -> list[StillIm
                 expression=spec.expression if spec else "",
                 direction=spec.direction if spec else "",
                 notes=spec.notes if spec else "",
+                size=spec.size if spec else StillImageFigureSize.AS_IS,
             )
         )
 
@@ -481,6 +491,49 @@ def build_composition_prompt(
     if illustration_style.strip():
         lines.append(f"作品全体の画風: {illustration_style.strip()}")
     return " ".join(lines)
+
+
+# 縮めるときの、立ち絵の高さ（出来上がりの高さに対する割合）。
+_FIGURE_SCALES = {
+    StillImageFigureSize.SMALL: 0.5,
+    StillImageFigureSize.SMALLER: 0.3,
+}
+# 縮めた立ち絵の縦の位置（余白のうち、上に取る割合）。立ち絵と同じく足もとの側を空けすぎない。
+_FIGURE_TOP_SHARE = 0.8
+
+
+def figure_reference(
+    image_path: Path, size: StillImageFigureSize, width: int, height: int
+) -> bytes:
+    """立ち絵を、出来上がりと同じ大きさの素背景の上へ縮めて置いたPNG。
+
+    Qwen-Image-Edit は参照画像の中での写り方に近い大きさで人物を描き、指示文で大きさを
+    言っても動かない（実測）。余白は立ち絵の縁の色で埋め、素背景が続いて見えるようにする。
+
+    背景へ仮置きした1枚を渡す形は取らない。大きさは揃うが、肩を組む・手渡しをするといった
+    絡みや、柱にもたれるといった動作が描かれなくなる（実測）。
+    """
+    with Image.open(image_path) as source:
+        figure = source.convert("RGB")
+    figure_height = max(1, round(height * _FIGURE_SCALES[size]))
+    figure_width = max(1, round(figure.width * figure_height / figure.height))
+    canvas = Image.new("RGB", (width, height), _edge_color(figure))
+    canvas.paste(
+        figure.resize((figure_width, figure_height), Image.LANCZOS),
+        (round((width - figure_width) / 2), round((height - figure_height) * _FIGURE_TOP_SHARE)),
+    )
+    output = io.BytesIO()
+    canvas.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _edge_color(image: Image.Image) -> tuple[int, int, int]:
+    """画像の縁の色の中央値。立ち絵は素背景なので、これが背景色になる。"""
+    width, height = image.size
+    edge = [image.getpixel((x, y)) for x in range(width) for y in (0, height - 1)]
+    edge += [image.getpixel((x, y)) for y in range(height) for x in (0, width - 1)]
+    middle = len(edge) // 2
+    return tuple(sorted(pixel[channel] for pixel in edge)[middle] for channel in range(3))
 
 
 def build_composition_workflow(

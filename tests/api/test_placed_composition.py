@@ -389,11 +389,19 @@ def test_pose_with_a_spec_edits_then_cuts_out_and_saves_the_spec(
     client.patch(f"/api/v1/still-images/{still_image_id}", json={"composition_method": "text"})
     client.post(
         f"/api/v1/still-images/{still_image_id}/compose",
-        json={"base_url": _BASE_URL, "character_specs": {character_id: {"placement": "右寄り"}}},
+        json={
+            "base_url": _BASE_URL,
+            "character_specs": {character_id: {"placement": "右寄り", "size": "small"}},
+        },
     )
     client.patch(f"/api/v1/still-images/{still_image_id}", json={"composition_method": "placed"})
 
-    character = _make_pose(client, still_image_id, character_id, {"direction": "右向き", "placement": "無視"})
+    character = _make_pose(
+        client,
+        still_image_id,
+        character_id,
+        {"direction": "右向き", "placement": "無視", "size": "smaller"},
+    )
 
     workflow = fake_comfy["workflows"][-1]
     assert workflow["103"]["inputs"]["image"] == ["31", 0]
@@ -402,6 +410,7 @@ def test_pose_with_a_spec_edits_then_cuts_out_and_saves_the_spec(
     assert workflow["30"]["inputs"]["steps"] > 4
     assert character["spec"]["direction"] == "右向き"
     assert character["spec"]["placement"] == "右寄り"
+    assert character["spec"]["size"] == "small"
     assert character["pose_spec"]["direction"] == "右向き"
     assert character["pose_prompt"] == workflow["20"]["inputs"]["prompt"]
 

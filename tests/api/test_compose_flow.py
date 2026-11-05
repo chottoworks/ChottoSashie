@@ -1,8 +1,11 @@
 import base64
+import io
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from chotto_sashie_shared.jobs import JobRepository
 from chotto_sashie_api import main
@@ -27,7 +30,9 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
     captured: dict = {"uploads": [], "workflow": None}
 
     async def upload_image(_self, data, filename, content_type="image/png", *, subfolder="", overwrite=True):
-        captured["uploads"].append({"filename": filename, "content_type": content_type, "size": len(data)})
+        captured["uploads"].append(
+            {"filename": filename, "content_type": content_type, "size": len(data), "data": data}
+        )
         return {"name": filename, "subfolder": "", "type": "input"}
 
     async def submit(_self, workflow):
@@ -387,6 +392,78 @@ def test_compose_without_specs_keeps_the_saved_ones(client: TestClient, fake_com
     assert saved[first]["expression"] == ""
     assert saved[second]["expression"] == "真顔"
     assert "the second person in image 2: 表情は真顔。" in fake_comfy["workflow"]["20"]["inputs"]["prompt"]
+
+
+def test_compose_passes_the_figure_as_it_is_by_default(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    """大きさを選ばなければ、立ち絵の画像をそのまま渡す。"""
+    project_id = _project(client)
+    character_id = _character_with_image(client, project_id)
+    still_image_id = _text_still_image(client, project_id, "そのまま", [character_id])
+
+    composed = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={"base_url": "http://127.0.0.1:8190"},
+    )
+
+    assert composed.status_code == 200
+    assert fake_comfy["uploads"][0]["data"] == _TINY_PNG
+    assert _saved_specs(client, still_image_id)[character_id]["size"] == "as_is"
+
+
+def _finished(client: TestClient, job_id: str) -> dict:
+    """立ち絵を縮めるのは別スレッドなので、応答の時点では合成が終わっていない。"""
+    for _ in range(200):
+        job = client.get(f"/api/v1/jobs/{job_id}").json()
+        if job["state"] in ("completed", "failed", "cancelled"):
+            return job
+        time.sleep(0.02)
+    raise AssertionError(f"ジョブが終わりませんでした: {job}")
+
+
+def test_compose_shrinks_only_the_figure_with_a_chosen_size(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    """縮めるのは指定した人物の立ち絵だけ。もう1人と背景はそのまま渡す。"""
+    still_image_id, first, second = _two_person_still_image(client)
+
+    composed = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "width": 1280,
+            "height": 720,
+            "character_specs": {first: {"size": "small"}},
+        },
+    )
+
+    assert composed.status_code == 200
+    assert _finished(client, composed.json()["job_id"])["state"] == "completed"
+    first_upload, second_upload, background_upload = fake_comfy["uploads"]
+    with Image.open(io.BytesIO(first_upload["data"])) as image:
+        assert image.size == (1280, 720)
+    assert second_upload["data"] == _TINY_PNG
+    assert background_upload["data"] == _TINY_PNG
+    saved = _saved_specs(client, still_image_id)
+    assert saved[first]["size"] == "small"
+    assert saved[second]["size"] == "as_is"
+
+
+def test_compose_rejects_an_unknown_figure_size(client: TestClient, fake_comfy: dict) -> None:
+    project_id = _project(client)
+    character_id = _character_with_image(client, project_id)
+    still_image_id = _text_still_image(client, project_id, "不明", [character_id])
+
+    response = client.post(
+        f"/api/v1/still-images/{still_image_id}/compose",
+        json={
+            "base_url": "http://127.0.0.1:8190",
+            "character_specs": {character_id: {"size": "huge"}},
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_compose_rejects_a_person_not_in_the_still_image(

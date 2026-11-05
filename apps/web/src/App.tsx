@@ -2509,6 +2509,7 @@ const EMPTY_STILL_IMAGE_CHARACTER_SPEC: api.StillImageCharacterSpec = {
   direction: "",
   placement: "",
   notes: "",
+  size: "as_is",
 };
 
 function StillImageCharacterPanel({
@@ -2604,6 +2605,14 @@ function StillImageCharacterPanel({
           <label>配置・位置</label>
           <input className="vs-input" value={spec.placement} onChange={(e) => onSpecChange({ ...spec, placement: e.target.value })} placeholder="例: 画面の右寄り" />
         </div>
+        <div>
+          <label>人物の大きさ</label>
+          <select className="vs-select" value={spec.size} onChange={(e) => onSpecChange({ ...spec, size: e.target.value as api.StillImageFigureSize })}>
+            <option value="as_is">そのまま</option>
+            <option value="small">小さめ</option>
+            <option value="smaller">もっと小さく</option>
+          </select>
+        </div>
       </div>
       <div className="vs-state-field">
         <label>補足</label>
@@ -2612,6 +2621,7 @@ function StillImageCharacterPanel({
       <div className="vs-state-actions">
         <span className="vs-muted">
           空のままにすると、立ち絵の姿勢・表情・向きのまま合成します。
+          人物を小さくするほど、顔や絵柄が立ち絵から変わりやすくなります。
         </span>
       </div>
       {lightbox.node}
@@ -2781,7 +2791,7 @@ function StillImagePosePanel({
               {pose.running ? "作っています..." : info?.pose_url ? "姿を作り直す" : "姿を作る"}
             </button>
             {differs && !pose.running && (
-              <button className="vs-btn ghost" onClick={() => onSpecChange({ ...spec, ...info!.pose_spec!, placement: spec.placement })}>
+              <button className="vs-btn ghost" onClick={() => onSpecChange({ ...spec, ...info!.pose_spec!, placement: spec.placement, size: spec.size })}>
                 書き換えを戻す
               </button>
             )}
@@ -3453,7 +3463,7 @@ function StillImageCard({
             <div className="vs-muted">
               {placed
                 ? "人物ごとに姿を作り、背景の上で位置と大きさを決めてから、人物のまわりだけをなじませます。置いたとおりの位置と大きさになり、背景はそのまま残ります。人物どうしが触れ合う構図は作れません。"
-                : "人物と背景を指示文から1枚に描き起こすので、背景となじみやすくなります。握手など、人物どうしが触れ合う構図も作れます。位置や大きさは文では決まりにくく、背景も描き直されます。"}
+                : "人物と背景を指示文から1枚に描き起こすので、背景となじみやすくなります。握手など、人物どうしが触れ合う構図も作れます。位置は文では決まりにくく、背景も描き直されます。人物が背景に対して大きいときは、人物ごとの指定の「人物の大きさ」で小さくできます。"}
             </div>
           </div>
 
