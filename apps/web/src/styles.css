@@ -310,9 +310,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* 合成に渡る素材（背景と、人物ごとに使う立ち絵）の一覧。高さをそろえて横に並べる。 */
 .vs-still-sources { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 2px; }
 .vs-still-source { display: grid; gap: 4px; margin: 0; }
-.vs-still-source-image { display: block; height: 132px; width: auto; max-width: 236px; aspect-ratio: 16 / 10; object-fit: cover; border: 1px solid #ddd5c7; border-radius: 7px; background: #efe9df; cursor: zoom-in; }
-/* 立ち絵は縦長の全身像。切り抜くと顔や足が欠けるので、そのまま収める。 */
-.vs-still-source-image.figure { aspect-ratio: auto; max-width: 132px; object-fit: contain; }
+/* 渡す素材の確認なので切り抜かず、絵の全体をそれぞれの縦横比のまま見せる。 */
+.vs-still-source-image { display: block; height: 132px; width: auto; max-width: 236px; object-fit: contain; border: 1px solid #ddd5c7; border-radius: 7px; background: #efe9df; cursor: zoom-in; }
+.vs-still-source-image.figure { max-width: 132px; }
 .vs-still-source-image.empty { display: grid; place-items: center; width: 132px; cursor: default; }
 .vs-still-source-image.figure.empty { width: 88px; }
 /* 静止画・シーンの一覧。1行に1件並べ、開いた1件だけ行の下に中身を広げる。 */
@@ -346,8 +346,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .vs-fold-text strong { font-size: 14px; }
 .vs-fold-body { padding: 14px 20px 18px; }
 .vs-still-body-actions { display: flex; justify-content: flex-end; margin-bottom: 4px; }
-/* 選んでいる背景。名前だけでは見分けにくいので、選ぶ欄のすぐ下に出す。 */
-.vs-picked-background { max-width: 280px; margin-top: 6px; }
+/* 選んでいる背景。名前だけでは見分けにくいので、選ぶ欄のすぐ下に絵の全体を出す。 */
+.vs-picked-background { max-width: 280px; margin-top: 6px; aspect-ratio: auto; object-fit: contain; }
 /* シーン画面では起点の1枚を確認できれば足りるので、小さめに出す。 */
 .vs-scene-start { max-width: 320px; }
 .vs-shot-video { display: grid; gap: 6px; margin-top: 8px; padding: 0; border: 1px solid #ded7c9; border-radius: 8px; background: #f6f2ea; cursor: pointer; overflow: hidden; }
