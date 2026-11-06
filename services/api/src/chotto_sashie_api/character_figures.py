@@ -23,7 +23,12 @@ from sqlite3 import Row
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
-from chotto_sashie_shared.comfy_client import ComfyClient, ComfyConnectionError, output_images
+from chotto_sashie_shared.comfy_client import (
+    ComfyClient,
+    ComfyConnectionError,
+    output_images,
+    prompt_finished,
+)
 from chotto_sashie_shared.comfy_monitor import RUNNING_END, RUNNING_START
 from chotto_sashie_shared.comfy_progress import JobProgressWriter
 from chotto_sashie_shared.comfy_scratch import ComfyScratch
@@ -602,12 +607,11 @@ async def monitor_figure_image(
                     progress.describe(wording.working),
                 )
             entry = await client.history(record.prompt_id) if record.prompt_id else None
-            status = entry.get("status", {}) if entry is not None else {}
-            if not isinstance(status, dict) or not status.get("completed"):
+            if entry is None or not prompt_finished(entry):
                 await asyncio.sleep(poll_seconds)
                 continue
             images = output_images(entry)
-            if status.get("status_str") == "success" and images:
+            if entry["status"].get("status_str") == "success" and images:
                 await _store_figure_image(records, client, destination, record_id, images[0])
             else:
                 records.fail(record_id, f"ComfyUIで{wording.failed}")

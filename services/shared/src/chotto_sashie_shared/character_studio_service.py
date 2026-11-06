@@ -17,7 +17,7 @@ from .candidates import (
     build_character_candidate_prompts,
 )
 from .character_schemas import CandidateGenerateRequest, CharacterRead
-from .comfy_client import ComfyClient, ComfyConnectionError, output_images
+from .comfy_client import ComfyClient, ComfyConnectionError, output_images, prompt_finished
 from .comfy_progress import JobProgressWriter, PromptProgress
 from .comfy_scratch import ComfyScratch
 from .comfy_workflows import bind_turbo_workflow
@@ -124,12 +124,11 @@ async def monitor_candidate_batch(
                 if not candidate.prompt_id:
                     continue
                 entry = await client.history(candidate.prompt_id)
-                status = entry.get("status", {}) if entry is not None else {}
-                if not isinstance(status, dict) or not status.get("completed"):
+                if entry is None or not prompt_finished(entry):
                     current = current or client.prompt_progress(candidate.prompt_id)
                     continue
                 images = output_images(entry)
-                if status.get("status_str") == "success" and images:
+                if entry["status"].get("status_str") == "success" and images:
                     repository.complete(candidate_id, images[0])
                     # 控えが出来ていなければComfyUI側を残す（表示のときに取り直せるように）。
                     keep = not await _store_candidate_image(

@@ -195,6 +195,19 @@ def output_filenames(history_entry: dict[str, Any]) -> list[str]:
     return filenames
 
 
+def prompt_finished(history_entry: dict[str, Any]) -> bool:
+    """履歴のプロンプトが終わったか（成否は問わない）。
+
+    ComfyUI の `status.completed` は「成功したか」を表し、失敗や中断では偽のまま
+    `status_str` が "error" になる。`completed` だけを見ると、失敗したプロンプトを
+    待ちの上限まで待ち続ける。成否は `status_str` で読み分ける。
+    """
+    status = history_entry.get("status")
+    if not isinstance(status, dict):
+        return False
+    return bool(status.get("completed")) or status.get("status_str") == "error"
+
+
 def output_images(history_entry: dict[str, Any]) -> list[dict[str, str]]:
     images: list[dict[str, str]] = []
     outputs = history_entry.get("outputs", {})

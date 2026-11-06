@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from websockets.asyncio.server import ServerConnection, serve
 
+from chotto_sashie_shared.comfy_client import prompt_finished
 from chotto_sashie_shared.comfy_monitor import (
     RUNNING_END,
     RUNNING_START,
@@ -184,6 +185,73 @@ class _ProgressingClient:
             "status": {"completed": True, "status_str": "success"},
             "outputs": {"9": {"images": [{"filename": "a.png", "subfolder": "", "type": "output"}]}},
         }
+
+
+@pytest.mark.parametrize(
+    ("entry", "finished"),
+    [
+        ({"status": {"completed": True, "status_str": "success"}}, True),
+        # ComfyUIは、失敗や中断では completed を偽のまま履歴へ載せる。
+        ({"status": {"completed": False, "status_str": "error"}}, True),
+        ({"status": {"completed": False}}, False),
+        ({}, False),
+    ],
+)
+def test_prompt_finished_counts_failures_as_finished(entry: dict, finished: bool) -> None:
+    assert prompt_finished(entry) is finished
+
+
+class _FailingClient:
+    """実行に失敗したプロンプトを履歴へ載せるComfyUI。"""
+
+    def __init__(self) -> None:
+        self.polls = 0
+
+    def prompt_progress(self, prompt_id: str) -> None:  # noqa: ARG002
+        return None
+
+    async def history(self, prompt_id: str) -> dict[str, object]:  # noqa: ARG002
+        self.polls += 1
+        return {"status": {"completed": False, "status_str": "error"}, "outputs": {}}
+
+
+def test_monitor_fails_the_job_as_soon_as_comfyui_reports_an_error(tmp_path: Path) -> None:
+    """失敗したプロンプトを待ちの上限まで待たない。"""
+    database = Database(tmp_path / "jobs.sqlite3")
+    database.initialize()
+    jobs = JobRepository(database)
+    job = jobs.create(JobCreate(kind="generation.turbo"))
+    jobs.transition(job.id, JobTransition(state="preparing"))
+    client = _FailingClient()
+
+    async def on_success(_files: list[dict[str, str]]) -> dict[str, object]:
+        raise AssertionError("失敗したプロンプトの成果物は取り込まない")
+
+    asyncio.run(
+        monitor_comfy_prompt(
+            client=client,  # type: ignore[arg-type]
+            jobs=jobs,
+            job_id=job.id,
+            prompt_id="p1",
+            on_success=on_success,
+            messages=MonitorMessages(
+                running="素材を生成しています",
+                saving="保存しています",
+                completed="できました",
+                failed="失敗しました",
+                failed_code="F",
+                timeout="時間切れ",
+                timeout_code="T",
+                monitor_failed_code="M",
+            ),
+            settings=MonitorSettings(poll_seconds=0.001, max_polls=10),
+        )
+    )
+
+    finished = jobs.get(job.id)
+    assert finished.state.value == "failed"
+    assert finished.error_code == "F"
+    assert client.polls == 1
 
 
 def test_monitor_writes_comfyui_progress_into_the_job(tmp_path: Path) -> None:

@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .comfy_client import ComfyClient, ComfyConnectionError, output_files
+from .comfy_client import ComfyClient, ComfyConnectionError, output_files, prompt_finished
 from .comfy_progress import JobProgressWriter
 from .comfy_scratch import ComfyScratch
 from .jobs import InvalidTransitionError, JobNotFoundError, JobRepository, JobTransition
@@ -88,16 +88,14 @@ async def monitor_comfy_prompt(
                     progress.describe(messages.running),
                 )
             entry = await client.history(prompt_id)
-            if entry is not None:
-                status = entry.get("status", {})
-                if isinstance(status, dict) and status.get("completed"):
-                    files = output_files(entry)
-                    try:
-                        await _finish(jobs, job_id, status, files, on_success, messages)
-                    finally:
-                        if scratch is not None:
-                            scratch.discard_outputs(files)
-                    return
+            if entry is not None and prompt_finished(entry):
+                files = output_files(entry)
+                try:
+                    await _finish(jobs, job_id, entry["status"], files, on_success, messages)
+                finally:
+                    if scratch is not None:
+                        scratch.discard_outputs(files)
+                return
             await asyncio.sleep(options.poll_seconds)
 
         jobs.transition(

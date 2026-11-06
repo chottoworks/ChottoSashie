@@ -25,6 +25,7 @@ from chotto_sashie_shared.comfy_client import (
     bind_workflow,
     load_workflow,
     output_files,
+    prompt_finished,
 )
 from chotto_sashie_shared.comfy_progress import JobProgressWriter, close_progress_watchers
 from chotto_sashie_shared.comfy_scratch import ComfyScratch
@@ -276,6 +277,7 @@ from .shot_video import (
 )
 from .translation import (
     TranslationCache,
+    TranslationFailedError,
     TranslationKind,
     TranslationSettings,
     TranslationUnavailableError,
@@ -3384,13 +3386,11 @@ async def _await_prompt_files(
                 current.describe(message),
             )
         entry = await client.history(prompt_id)
-        if entry is not None:
-            status = entry.get("status", {})
-            if isinstance(status, dict) and status.get("completed"):
-                files = output_files(entry)
-                if status.get("status_str") == "success" and files:
-                    return files
-                raise ShotVideoError("ComfyUIでカットの動画を生成できませんでした")
+        if entry is not None and prompt_finished(entry):
+            files = output_files(entry)
+            if entry["status"].get("status_str") == "success" and files:
+                return files
+            raise ShotVideoError("ComfyUIでカットの動画を生成できませんでした")
         await asyncio.sleep(poll_seconds)
     raise ShotVideoError("動画生成の待機がタイムアウトしました")
 
@@ -3740,10 +3740,10 @@ async def _await_prompt_history(
     poll_seconds: float = 0.5,
     max_polls: int = 1200,
 ) -> dict[str, object] | None:
-    """1件のプロンプトの完了を待って履歴を返す（ジョブの状態には触れない）。"""
+    """1件のプロンプトが終わるのを待って履歴を返す（ジョブの状態には触れない）。"""
     for _ in range(max_polls):
         entry = await client.history(prompt_id)
-        if entry is not None and entry.get("status", {}).get("completed"):
+        if entry is not None and prompt_finished(entry):
             return entry
         await asyncio.sleep(poll_seconds)
     return None
@@ -3755,8 +3755,10 @@ async def _translate_texts(
     """日本語の指示文を英語へ直し、覚えておく。
 
     セリフは渡さない（読み上げてほしい言葉そのものなので、日本語のまま使う）。
-    訳せなかった分は表に載せず、呼び出し側で元の文のまま進める。翻訳できないことで
-    生成そのものを止めない。`kind="person"` は、セリフの話す人を名指しする句にする。
+    翻訳を使えない環境（モデルが無いなど）では、表に載せずに元の文のまま進める。
+    ComfyUIが実行に失敗したときは `TranslationFailedError` をそのまま上げる。
+    日本語が残った文を「用意できた文」として保存すると、説明文まで読み上げた動画を作る。
+    `kind="person"` は、セリフの話す人を名指しする句にする。
     """
     cache = TranslationCache(database)
     options = TranslationSettings()
@@ -3785,7 +3787,7 @@ async def _translate_texts(
                 kind=kind,
             )
         except (TranslationUnavailableError, ComfyConnectionError, OSError, ValueError):
-            # 翻訳用のモデルが無い環境もある。日本語のまま進め、画面の注意で知らせる。
+            # 翻訳用のモデルが無い環境もある。日本語のまま進める。
             continue
         cache.put(source, english, options.clip_name, datetime.now(UTC).isoformat(), kind)
         table[source] = english
@@ -4082,7 +4084,7 @@ async def prepare_shot_prompt(shot_id: str, request: ShotPromptRequest) -> ShotP
                     result={"shot_id": shot_id},
                 ),
             )
-        except (ComfyConnectionError, OSError, ValueError) as error:
+        except (ComfyConnectionError, TranslationFailedError, OSError, ValueError) as error:
             _fail_job(job_id, str(error), "SHOT_PROMPT_FAILED")
 
     job = await gpu_queue.submit(
@@ -4234,6 +4236,9 @@ async def generate_shot_video(
                 segments = await _prepare_shot_segments(
                     client, current, request.engine, on_translating=announce
                 )
+                # 文を用意している間に中止されたら、動画の生成へ進まない。
+                if jobs.is_cancelled(job_id):
+                    return
                 shots.set_resolved_prompt(
                     shot_id, segments, request.engine, prompt_signature(current)
                 )
@@ -4297,6 +4302,8 @@ async def generate_shot_video(
                 base_url,
                 video_format=ENGINE_VIDEO_FORMATS[request.engine],
             )
+        except TranslationFailedError as error:
+            _fail_job(job_id, str(error), "SHOT_PROMPT_FAILED")
         except (ComfyConnectionError, ShotVideoError, OSError, ValueError) as error:
             _fail_job(job_id, str(error), "SHOT_VIDEO_SUBMIT_FAILED")
         finally:

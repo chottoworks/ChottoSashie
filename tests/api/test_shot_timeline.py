@@ -81,6 +81,11 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
     async def history(_self, prompt_id):
         index = int(prompt_id.rsplit("-", 1)[-1])
         if state["kinds"][index - 1] == "text":
+            if "on_translation" in state:
+                state["on_translation"]()
+            if state.get("translation_fails"):
+                # 実機のComfyUIは、実行に失敗すると completed を偽のまま履歴へ載せる。
+                return {"status": {"completed": False, "status_str": "error"}, "outputs": {}}
             # 実機の Gemma 4 と同じく、英語1行を返す。
             return {
                 "status": {"completed": True, "status_str": "success"},
@@ -767,6 +772,72 @@ def test_japanese_directions_are_translated_before_sending(client: TestClient, f
     assert "english line 1" in prompt.lower()
     # セリフは訳さない（読み上げてほしい言葉そのもの）。
     assert '"行こう"' in prompt
+
+
+def test_failed_translation_stops_before_the_video(client: TestClient, fake_comfy: dict) -> None:
+    """ComfyUIが翻訳の実行に失敗したら、待ち続けず、日本語のまま動画へも進まない。
+
+    日本語が残った文で作ると説明文まで読み上げるうえ、その文が用意できた文として残る。
+    """
+    still_image_id = _still_image(client)
+    shot_id = client.post(
+        f"/api/v1/still-images/{still_image_id}/shots",
+        json={"motion_prompt": "ゆっくり振り返る"},
+    ).json()["id"]
+    fake_comfy["translation_fails"] = True
+
+    job_id = _generate(client, shot_id)["job_id"]
+
+    job = client.get(f"/api/v1/jobs/{job_id}").json()
+    assert job["state"] == "failed"
+    assert job["error_code"] == "SHOT_PROMPT_FAILED"
+    assert "生成に使う文を用意できませんでした" in job["message"]
+    assert _video_prompts(fake_comfy) == []
+    assert _prompt_state(client, shot_id)["ready"] is False
+
+    # もう一度試して訳せれば、英語の文で動画まで進む。
+    fake_comfy["translation_fails"] = False
+    job_id = _generate(client, shot_id)["job_id"]
+    assert client.get(f"/api/v1/jobs/{job_id}").json()["state"] == "completed"
+    assert "ゆっくり振り返る" not in _video_prompts(fake_comfy)[0]
+
+
+def test_failed_translation_is_reported_when_only_preparing(client: TestClient, fake_comfy: dict) -> None:
+    still_image_id = _still_image(client)
+    shot_id = client.post(
+        f"/api/v1/still-images/{still_image_id}/shots",
+        json={"motion_prompt": "ゆっくり振り返る"},
+    ).json()["id"]
+    fake_comfy["translation_fails"] = True
+
+    response = client.post(
+        f"/api/v1/shots/{shot_id}/prompt",
+        json={"base_url": "http://127.0.0.1:8190", "engine": "minimax_h3"},
+    )
+
+    job = client.get(f"/api/v1/jobs/{response.json()['job_id']}").json()
+    assert job["state"] == "failed"
+    assert job["error_code"] == "SHOT_PROMPT_FAILED"
+    assert _prompt_state(client, shot_id)["ready"] is False
+
+
+def test_cancelling_while_preparing_never_starts_the_video(client: TestClient, fake_comfy: dict) -> None:
+    still_image_id = _still_image(client)
+    shot_id = client.post(
+        f"/api/v1/still-images/{still_image_id}/shots",
+        json={"motion_prompt": "ゆっくり振り返る"},
+    ).json()["id"]
+
+    def cancel_running_job() -> None:
+        job = next(job for job in main.jobs.list(5) if job.state.value == "running")
+        main.jobs.request_cancel(job.id)
+
+    fake_comfy["on_translation"] = cancel_running_job
+
+    job_id = _generate(client, shot_id)["job_id"]
+
+    assert client.get(f"/api/v1/jobs/{job_id}").json()["state"] == "cancelled"
+    assert _video_prompts(fake_comfy) == []
 
 
 def test_speech_is_never_sent_to_the_translator(client: TestClient, fake_comfy: dict) -> None:

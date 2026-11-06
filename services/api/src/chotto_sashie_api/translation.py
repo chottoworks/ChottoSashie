@@ -145,6 +145,20 @@ class TranslationUnavailableError(RuntimeError):
     """翻訳できない（モデルが無い・接続できない等）。元の文のまま進める合図。"""
 
 
+class TranslationFailedError(RuntimeError):
+    """翻訳を依頼できたのに、ComfyUIが実行に失敗した（または終わらなかった）。
+
+    翻訳を使える環境での一時的な失敗なので、元の文のまま進めず、生成を失敗にして
+    やり直してもらう。訳せた分は覚えてあるので、やり直しは残りだけで済む。
+    """
+
+
+# 利用者が読む文言。訳すという内部の処理には触れない。
+_TRANSLATION_FAILED_MESSAGE = (
+    "ComfyUIの処理に失敗したため、生成に使う文を用意できませんでした。もう一度試してください"
+)
+
+
 async def translate_once(
     client: ComfyClient,
     template: dict[str, Any],
@@ -154,7 +168,10 @@ async def translate_once(
     wait_for: Any,
     kind: TranslationKind = "direction",
 ) -> str:
-    """1文を英語へ直す。訳せなければ `TranslationUnavailableError`。
+    """1文を英語へ直す。
+
+    翻訳を使えなければ `TranslationUnavailableError`、依頼したのに実行に失敗したら
+    `TranslationFailedError`。
 
     `wait_for` は「プロンプトIDを渡すと履歴を返す」待ち関数。監視の作法は呼び出し側の
     事情（ジョブの進捗や中止）で変わるため、ここには持ち込まない。
@@ -166,10 +183,10 @@ async def translate_once(
         raise TranslationUnavailableError(str(error)) from error
     entry = await wait_for(prompt_id)
     if entry is None:
-        raise TranslationUnavailableError("翻訳の待機がタイムアウトしました")
+        raise TranslationFailedError(_TRANSLATION_FAILED_MESSAGE)
     status = entry.get("status", {})
     if isinstance(status, dict) and status.get("status_str") != "success":
-        raise TranslationUnavailableError("ComfyUIで翻訳できませんでした")
+        raise TranslationFailedError(_TRANSLATION_FAILED_MESSAGE)
     cleaned = clean_output(extract_generated_text(entry))
     if not cleaned:
         raise TranslationUnavailableError("翻訳結果を読み取れませんでした")
