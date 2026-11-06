@@ -116,6 +116,41 @@ def _with_base_image(client: TestClient, character_id: str) -> None:
     client.post(f"/api/v1/character-candidates/{candidates[0]['id']}/select-base")
 
 
+def test_failed_figure_tells_why(
+    client: TestClient, fake_comfy: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project_id, character_id = _character(client)
+    _with_base_image(client, character_id)
+
+    async def history(_self, _prompt_id):
+        return {
+            "status": {
+                "completed": False,
+                "status_str": "error",
+                "messages": [
+                    [
+                        "execution_error",
+                        {"exception_type": "MemoryError", "exception_message": "\n"},
+                    ]
+                ],
+            },
+            "outputs": {},
+        }
+
+    monkeypatch.setattr(main.ComfyClient, "history", history)
+    response = client.post(
+        f"/api/v1/characters/{character_id}/figures/generate", json={"seed": 500}
+    )
+
+    job = _finish_job(client, response.json()["job"]["id"])
+
+    assert job["state"] == "failed"
+    assert job["error_code"] == "FIGURE_FAILED"
+    assert "メモリが足りません" in job["message"]
+    figure = client.get(f"/api/v1/characters/{character_id}/figures").json()[0]
+    assert "メモリが足りません" in figure["error_message"]
+
+
 def _generate_figures(
     client: TestClient, character_id: str, count: int = 3, seed: int = 500
 ) -> list[dict]:

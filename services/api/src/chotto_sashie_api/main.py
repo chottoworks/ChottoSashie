@@ -25,6 +25,7 @@ from chotto_sashie_shared.comfy_client import (
     bind_workflow,
     load_workflow,
     output_files,
+    prompt_failure_message,
     prompt_finished,
 )
 from chotto_sashie_shared.comfy_progress import JobProgressWriter, close_progress_watchers
@@ -3390,7 +3391,9 @@ async def _await_prompt_files(
             files = output_files(entry)
             if entry["status"].get("status_str") == "success" and files:
                 return files
-            raise ShotVideoError("ComfyUIでカットの動画を生成できませんでした")
+            raise ShotVideoError(
+                prompt_failure_message(entry, "ComfyUIでカットの動画を生成できませんでした")
+            )
         await asyncio.sleep(poll_seconds)
     raise ShotVideoError("動画生成の待機がタイムアウトしました")
 

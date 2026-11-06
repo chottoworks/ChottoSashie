@@ -12,7 +12,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .comfy_client import ComfyClient, ComfyConnectionError, output_files, prompt_finished
+from .comfy_client import (
+    ComfyClient,
+    ComfyConnectionError,
+    output_files,
+    prompt_failure_message,
+    prompt_finished,
+)
 from .comfy_progress import JobProgressWriter
 from .comfy_scratch import ComfyScratch
 from .jobs import InvalidTransitionError, JobNotFoundError, JobRepository, JobTransition
@@ -91,7 +97,7 @@ async def monitor_comfy_prompt(
             if entry is not None and prompt_finished(entry):
                 files = output_files(entry)
                 try:
-                    await _finish(jobs, job_id, entry["status"], files, on_success, messages)
+                    await _finish(jobs, job_id, entry, files, on_success, messages)
                 finally:
                     if scratch is not None:
                         scratch.discard_outputs(files)
@@ -123,13 +129,13 @@ async def monitor_comfy_prompt(
 async def _finish(
     jobs: JobRepository,
     job_id: str,
-    status: dict[str, Any],
+    entry: dict[str, Any],
     files: list[dict[str, str]],
     on_success: OnSuccess,
     messages: MonitorMessages,
 ) -> None:
     """終わったプロンプトの成否に合わせて、成果物を取り込みジョブを終端へ進める。"""
-    if status.get("status_str") == "success" and files:
+    if entry["status"].get("status_str") == "success" and files:
         result = await on_success(files)
         jobs.transition(
             job_id,
@@ -149,7 +155,7 @@ async def _finish(
         job_id,
         JobTransition(
             state="failed",
-            message=messages.failed,
+            message=prompt_failure_message(entry, messages.failed),
             error_code=messages.failed_code,
         ),
     )

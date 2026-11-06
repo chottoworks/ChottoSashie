@@ -156,6 +156,43 @@ def test_candidate_batch_and_base_selection(
     assert listed[0]["figure_count"] == 0
 
 
+def test_failed_candidates_tell_why(
+    client: TestClient, fake_comfy: dict[str, list], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def history(_self, _prompt_id):
+        return {
+            "status": {
+                "completed": False,
+                "status_str": "error",
+                "messages": [
+                    [
+                        "execution_error",
+                        {"exception_type": "MemoryError", "exception_message": "\n"},
+                    ]
+                ],
+            },
+            "outputs": {},
+        }
+
+    monkeypatch.setattr(main.ComfyClient, "history", history)
+    _project_id, character_id = _character(client)
+    started = client.post(
+        f"/api/v1/characters/{character_id}/candidates/generate",
+        json={"count": 8, "seed_start": 1},
+    )
+
+    job = _finish_job(client, started.json()["job"]["id"])
+
+    assert job["state"] == "failed"
+    assert job["message"] == (
+        "人物候補を1枚も生成できませんでした。メモリが足りません。ほかのアプリを閉じると空きます"
+    )
+    candidate = client.get(f"/api/v1/characters/{character_id}/candidates").json()[0]
+    assert candidate["error_message"] == (
+        "ComfyUIで候補画像を生成できませんでした。メモリが足りません。ほかのアプリを閉じると空きます"
+    )
+
+
 def test_candidate_image_is_stored_locally(
     client: TestClient, fake_comfy: dict[str, list]
 ) -> None:

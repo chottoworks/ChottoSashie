@@ -17,7 +17,13 @@ from .candidates import (
     build_character_candidate_prompts,
 )
 from .character_schemas import CandidateGenerateRequest, CharacterRead
-from .comfy_client import ComfyClient, ComfyConnectionError, output_images, prompt_finished
+from .comfy_client import (
+    ComfyClient,
+    ComfyConnectionError,
+    output_images,
+    prompt_failure_message,
+    prompt_finished,
+)
 from .comfy_progress import JobProgressWriter, PromptProgress
 from .comfy_scratch import ComfyScratch
 from .comfy_workflows import bind_turbo_workflow
@@ -108,6 +114,8 @@ async def monitor_candidate_batch(
     pending = set(candidate_ids)
     total = len(candidate_ids)
     writer = JobProgressWriter(jobs, job_id)
+    # 全滅したときに理由を伝えるため、最後に失敗した履歴を覚えておく。
+    failed_entry: dict[str, Any] = {}
     try:
         writer.write(0.1, f"人物候補を生成しています（0/{total}）")
         for _ in range(max_polls):
@@ -135,7 +143,11 @@ async def monitor_candidate_batch(
                         client, data_dir, candidate_id, images[0]
                     )
                 else:
-                    repository.fail(candidate_id, "ComfyUIで候補画像を生成できませんでした")
+                    failed_entry = entry
+                    repository.fail(
+                        candidate_id,
+                        prompt_failure_message(entry, "ComfyUIで候補画像を生成できませんでした"),
+                    )
                     keep = False
                 if scratch is not None and not keep:
                     scratch.discard_outputs(images)
@@ -163,7 +175,9 @@ async def monitor_candidate_batch(
                         job_id,
                         JobTransition(
                             state="failed",
-                            message="人物候補を1枚も生成できませんでした",
+                            message=prompt_failure_message(
+                                failed_entry, "人物候補を1枚も生成できませんでした"
+                            ),
                             error_code="CANDIDATE_BATCH_FAILED",
                             result=result,
                         ),

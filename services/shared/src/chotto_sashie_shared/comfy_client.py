@@ -208,6 +208,62 @@ def prompt_finished(history_entry: dict[str, Any]) -> bool:
     return bool(status.get("completed")) or status.get("status_str") == "error"
 
 
+# 足りないものが分かる失敗は、次にできることまで伝える。ComfyUIの文のままでは読み取れない。
+_VRAM_SHORTAGE = "VRAMが足りません。ほかのアプリを閉じると空きます"
+_MEMORY_SHORTAGE = "メモリが足りません。ほかのアプリを閉じると空きます"
+# モデルの重みを読むバッファの失敗は、メモリ不足のほかディスクの読み取りでも起きる。
+_MODEL_READ_FAILURE = "モデルをメモリへ読み込めません。メモリが足りないときは、ほかのアプリを閉じると空きます"
+_MEMORY_SHORTAGE_TEXTS = ("not enough memory", "paging file")
+_FAILURE_DETAIL_LIMIT = 300
+
+
+def _describe_execution_error(error: dict[str, Any]) -> str | None:
+    text = str(error.get("exception_message") or "")
+    lowered = text.lower()
+    exception_type = str(error.get("exception_type") or "")
+    if exception_type.endswith("OutOfMemoryError") or "out of memory" in lowered:
+        return _VRAM_SHORTAGE
+    if exception_type == "MemoryError" or any(item in lowered for item in _MEMORY_SHORTAGE_TEXTS):
+        return _MEMORY_SHORTAGE
+    if "hostbuf" in lowered:
+        return _MODEL_READ_FAILURE
+    # ほかの失敗は、ComfyUIの画面に出るのと同じノード名と文をそのまま伝える。
+    # 2行目以降はComfyUIが添える一般的な助言なので、最初の行だけにする。
+    detail = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    if not detail:
+        return None
+    detail = detail[:_FAILURE_DETAIL_LIMIT]
+    node_type = error.get("node_type")
+    return f"{node_type}: {detail}" if node_type else detail
+
+
+def prompt_failure_reason(history_entry: dict[str, Any]) -> str | None:
+    """失敗したプロンプトの理由を、利用者へ見せる文にする。分からなければ None。
+
+    ComfyUI は実行時の例外を `status.messages` の `execution_error` に残す。
+    中断や、成功したのに成果物が無い場合には理由が残らない。
+    """
+    status = history_entry.get("status")
+    messages = status.get("messages") if isinstance(status, dict) else None
+    if not isinstance(messages, list):
+        return None
+    for message in messages:
+        if (
+            isinstance(message, list)
+            and len(message) == 2
+            and message[0] == "execution_error"
+            and isinstance(message[1], dict)
+        ):
+            return _describe_execution_error(message[1])
+    return None
+
+
+def prompt_failure_message(history_entry: dict[str, Any], summary: str) -> str:
+    """何ができなかったか（`summary`）に、分かれば理由を続けた文を返す。"""
+    reason = prompt_failure_reason(history_entry)
+    return f"{summary}。{reason}" if reason else summary
+
+
 def output_images(history_entry: dict[str, Any]) -> list[dict[str, str]]:
     images: list[dict[str, str]] = []
     outputs = history_entry.get("outputs", {})

@@ -52,6 +52,20 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         yield test_client
 
 
+def _memory_failure() -> dict:
+    """実機のComfyUIは、実行に失敗すると completed を偽のまま、理由を添えて履歴へ載せる。"""
+    return {
+        "status": {
+            "completed": False,
+            "status_str": "error",
+            "messages": [
+                ["execution_error", {"exception_type": "MemoryError", "exception_message": "\n"}]
+            ],
+        },
+        "outputs": {},
+    }
+
+
 @pytest.fixture
 def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
     """ワークフローどおり「動画1本＋最終フレームPNG1枚」を返すComfyUI。
@@ -84,8 +98,7 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
             if "on_translation" in state:
                 state["on_translation"]()
             if state.get("translation_fails"):
-                # 実機のComfyUIは、実行に失敗すると completed を偽のまま履歴へ載せる。
-                return {"status": {"completed": False, "status_str": "error"}, "outputs": {}}
+                return _memory_failure()
             # 実機の Gemma 4 と同じく、英語1行を返す。
             return {
                 "status": {"completed": True, "status_str": "success"},
@@ -104,6 +117,8 @@ def fake_comfy(monkeypatch: pytest.MonkeyPatch) -> dict:
                     "40": {"images": [{"filename": f"last{index}.png", "subfolder": "f", "type": "output"}]},
                 },
             }
+        if state.get("video_fails"):
+            return _memory_failure()
         return {
             "status": {"completed": True, "status_str": "success"},
             "outputs": {
@@ -413,6 +428,28 @@ def test_split_mode_generates_one_segment_per_beat(client: TestClient, fake_comf
     beats = client.get(f"/api/v1/shots/{shot_id}/beats").json()
     assert all(beat["has_segment_video"] for beat in beats)
     assert all(beat["segment_video_format"] == "mp4" for beat in beats)
+
+
+@pytest.mark.parametrize(
+    ("durations", "error_code"),
+    [([3.0], "SHOT_VIDEO_FAILED"), ([3.0, 3.0], "SHOT_VIDEO_SUBMIT_FAILED")],
+    ids=["1本", "分割"],
+)
+def test_failed_video_tells_why(
+    client: TestClient, fake_comfy: dict, durations: list[float], error_code: str
+) -> None:
+    """何ができなかったかだけでなく、ComfyUIが失敗した理由まで伝える。"""
+    still_image_id = _still_image(client)
+    shot_id = _shot_with_beats(client, still_image_id, durations)
+    fake_comfy["video_fails"] = True
+
+    job = client.get(f"/api/v1/jobs/{_generate(client, shot_id)['job_id']}").json()
+
+    assert job["state"] == "failed"
+    assert job["error_code"] == error_code
+    assert job["message"] == (
+        "ComfyUIでカットの動画を生成できませんでした。メモリが足りません。ほかのアプリを閉じると空きます"
+    )
 
 
 
@@ -792,6 +829,7 @@ def test_failed_translation_stops_before_the_video(client: TestClient, fake_comf
     assert job["state"] == "failed"
     assert job["error_code"] == "SHOT_PROMPT_FAILED"
     assert "生成に使う文を用意できませんでした" in job["message"]
+    assert "メモリが足りません" in job["message"]
     assert _video_prompts(fake_comfy) == []
     assert _prompt_state(client, shot_id)["ready"] is False
 

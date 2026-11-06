@@ -27,6 +27,7 @@ from chotto_sashie_shared.comfy_client import (
     ComfyClient,
     ComfyConnectionError,
     output_images,
+    prompt_failure_message,
     prompt_finished,
 )
 from chotto_sashie_shared.comfy_monitor import RUNNING_END, RUNNING_START
@@ -614,14 +615,16 @@ async def monitor_figure_image(
             if entry["status"].get("status_str") == "success" and images:
                 await _store_figure_image(records, client, destination, record_id, images[0])
             else:
-                records.fail(record_id, f"ComfyUIで{wording.failed}")
+                records.fail(record_id, prompt_failure_message(entry, f"ComfyUIで{wording.failed}"))
             if scratch is not None:
                 scratch.discard_outputs(images)
             if records.get(record_id).state != "completed":
                 jobs.transition(
                     job_id,
                     JobTransition(
-                        state="failed", message=wording.failed, error_code="FIGURE_FAILED"
+                        state="failed",
+                        message=prompt_failure_message(entry, wording.failed),
+                        error_code="FIGURE_FAILED",
                     ),
                 )
                 return

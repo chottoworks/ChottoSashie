@@ -9,7 +9,11 @@ from pathlib import Path
 import pytest
 from websockets.asyncio.server import ServerConnection, serve
 
-from chotto_sashie_shared.comfy_client import prompt_finished
+from chotto_sashie_shared.comfy_client import (
+    prompt_failure_message,
+    prompt_failure_reason,
+    prompt_finished,
+)
 from chotto_sashie_shared.comfy_monitor import (
     RUNNING_END,
     RUNNING_START,
@@ -201,6 +205,84 @@ def test_prompt_finished_counts_failures_as_finished(entry: dict, finished: bool
     assert prompt_finished(entry) is finished
 
 
+def _failed_entry(**error: object) -> dict[str, object]:
+    """ComfyUIが実行時の例外を載せる形の履歴。"""
+    return {
+        "status": {
+            "completed": False,
+            "status_str": "error",
+            "messages": [
+                ["execution_start", {"prompt_id": "p1", "timestamp": 1}],
+                ["execution_error", {"prompt_id": "p1", "node_id": "7", **error}],
+            ],
+        },
+        "outputs": {},
+    }
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            {
+                "exception_type": "torch.OutOfMemoryError",
+                "exception_message": "Allocation on device\nThis error means you ran out of memory on your GPU.",
+            },
+            "VRAMが足りません。ほかのアプリを閉じると空きます",
+        ),
+        (
+            {"exception_type": "MemoryError", "exception_message": "\n"},
+            "メモリが足りません。ほかのアプリを閉じると空きます",
+        ),
+        (
+            {
+                "exception_type": "OSError",
+                "exception_message": "The paging file is too small for this operation to complete.\n",
+            },
+            "メモリが足りません。ほかのアプリを閉じると空きます",
+        ),
+        (
+            {
+                "exception_type": "RuntimeError",
+                "exception_message": "HostBuffer.read_file_slice failed\n",
+            },
+            "モデルをメモリへ読み込めません。メモリが足りないときは、ほかのアプリを閉じると空きます",
+        ),
+        # 分類できない失敗は、ComfyUIの画面と同じくノード名と文を出す。添えられた助言は落とす。
+        (
+            {
+                "node_type": "KSampler",
+                "exception_type": "RuntimeError",
+                "exception_message": "mat1 and mat2 shapes cannot be multiplied\n\n\nTIPS: check the loader",
+            },
+            "KSampler: mat1 and mat2 shapes cannot be multiplied",
+        ),
+    ],
+)
+def test_failure_reason_comes_from_the_history(error: dict, expected: str) -> None:
+    assert prompt_failure_reason(_failed_entry(**error)) == expected
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {},
+        {"status": {"completed": False, "status_str": "error"}},
+        # 中断には理由が残らない。
+        {"status": {"status_str": "error", "messages": [["execution_interrupted", {"node_id": "7"}]]}},
+        _failed_entry(exception_type="RuntimeError", exception_message="\n"),
+    ],
+)
+def test_failure_message_is_only_the_summary_without_a_reason(entry: dict) -> None:
+    assert prompt_failure_reason(entry) is None
+    assert prompt_failure_message(entry, "生成できませんでした") == "生成できませんでした"
+
+
+def test_failure_message_continues_with_the_reason() -> None:
+    entry = _failed_entry(node_type="KSampler", exception_message="broken\n")
+    assert prompt_failure_message(entry, "生成できませんでした") == "生成できませんでした。KSampler: broken"
+
+
 class _FailingClient:
     """実行に失敗したプロンプトを履歴へ載せるComfyUI。"""
 
@@ -212,7 +294,7 @@ class _FailingClient:
 
     async def history(self, prompt_id: str) -> dict[str, object]:  # noqa: ARG002
         self.polls += 1
-        return {"status": {"completed": False, "status_str": "error"}, "outputs": {}}
+        return _failed_entry(exception_type="MemoryError", exception_message="\n")
 
 
 def test_monitor_fails_the_job_as_soon_as_comfyui_reports_an_error(tmp_path: Path) -> None:
@@ -251,6 +333,7 @@ def test_monitor_fails_the_job_as_soon_as_comfyui_reports_an_error(tmp_path: Pat
     finished = jobs.get(job.id)
     assert finished.state.value == "failed"
     assert finished.error_code == "F"
+    assert finished.message == "失敗しました。メモリが足りません。ほかのアプリを閉じると空きます"
     assert client.polls == 1
 
 

@@ -23,7 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from chotto_sashie_shared.comfy_client import ComfyClient, ComfyConnectionError, bind_workflow
+from chotto_sashie_shared.comfy_client import (
+    ComfyClient,
+    ComfyConnectionError,
+    bind_workflow,
+    prompt_failure_message,
+)
 
 # 生成できるテキストエンコーダの既定。手元にある Gemma 4 E4B（指示調整済み）を使う。
 # `CLIPLoader` は単一ファイルなら検出したモデルで読み込み先を決めるため、type は
@@ -154,9 +159,12 @@ class TranslationFailedError(RuntimeError):
 
 
 # 利用者が読む文言。訳すという内部の処理には触れない。
-_TRANSLATION_FAILED_MESSAGE = (
-    "ComfyUIの処理に失敗したため、生成に使う文を用意できませんでした。もう一度試してください"
-)
+_TRANSLATION_FAILED_SUMMARY = "ComfyUIの処理に失敗したため、生成に使う文を用意できませんでした"
+
+
+def _translation_failed_message(history_entry: dict[str, Any]) -> str:
+    message = prompt_failure_message(history_entry, _TRANSLATION_FAILED_SUMMARY)
+    return f"{message}。もう一度試してください"
 
 
 async def translate_once(
@@ -183,10 +191,10 @@ async def translate_once(
         raise TranslationUnavailableError(str(error)) from error
     entry = await wait_for(prompt_id)
     if entry is None:
-        raise TranslationFailedError(_TRANSLATION_FAILED_MESSAGE)
+        raise TranslationFailedError(_translation_failed_message({}))
     status = entry.get("status", {})
     if isinstance(status, dict) and status.get("status_str") != "success":
-        raise TranslationFailedError(_TRANSLATION_FAILED_MESSAGE)
+        raise TranslationFailedError(_translation_failed_message(entry))
     cleaned = clean_output(extract_generated_text(entry))
     if not cleaned:
         raise TranslationUnavailableError("翻訳結果を読み取れませんでした")
