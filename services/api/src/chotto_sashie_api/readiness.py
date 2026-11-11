@@ -3,6 +3,7 @@
 押せるのに必ず失敗するボタンを無くすため、判定は生成側と同じ根拠から作る。
 合成は `resolve_still_image_sources`、カットの動画生成は起点フレームの有無で、
 実行時と同じ条件を先に評価して理由を返す。UIはこれを表示するだけにする。
+カットの着地の絵（`resolve_shot_end_frame`）も、表示と生成が同じ解決を使う。
 置いて合成する静止画は `resolve_placed_sources` を通す。
 """
 
@@ -91,6 +92,84 @@ def _resolve_start_frame_owner(database, shot, *, continue_from_previous: bool =
     if still_image is not None and still_image.is_file():
         return "still_image", shot.still_image_id, still_image
     return "none", "", None
+
+
+def resolve_shot_end_frame(database, shot):  # noqa: ANN001, ANN201
+    """このカットの着地の絵を「出どころ」「実体」「用意できない理由」の組で返す。"""
+    source, _owner_id, image_path, reason = _resolve_end_frame_owner(database, shot)
+    return source, image_path, reason
+
+
+def resolve_shot_end_frame_version(database, shot) -> tuple[str, str, str]:  # noqa: ANN001
+    """着地の絵の「出どころ」と、その画像URLに付ける版、用意できない理由を返す。
+
+    次のシーンの静止画は他の記録の絵で、合成し直されてもこのカットの記録は変わらない。
+    版は起点と同じく、絵を持つ記録とその記録の画像の版から作る。
+    """
+    from .shots import ShotRepository
+    from .still_images import StillImageRepository
+
+    source, owner_id, _image_path, reason = _resolve_end_frame_owner(database, shot)
+    if source == "custom":
+        revision = str(ShotRepository(database).frame_revision(owner_id))
+    elif source == "next_scene":
+        revision = StillImageRepository(database).get(owner_id).image_version
+    else:
+        return source, "", reason
+    return source, f"{source}:{owner_id}:{revision}", reason
+
+
+def _resolve_end_frame_owner(database, shot):  # noqa: ANN001, ANN202
+    """着地の絵の「出どころ」「その絵を持つ記録のID」「実体」「用意できない理由」を返す。
+
+    次のシーンの静止画へ着地する指定があれば、その静止画を参照する（写しは持たない）。
+    無ければ、構図を変えて作った着地の絵。どちらも無ければ着地は固定しない。
+
+    次のシーンの静止画へ着地できるのは、シーンの最後のカットだけにする。途中のカットで
+    着地させると、同じシーンの続きのカットが、このシーンの静止画にいない人物の写った絵から
+    始まり、話す人の名指しが画面と食い違う。
+
+    指定があるのに絵を用意できないときは、理由を返す（黙って着地なしで生成しない）。
+    起点と同じく、判定・表示・生成がここを共有する。
+    """
+    from .still_images import StillImageNotFoundError, StillImageRepository
+    from .shots import ShotRepository
+
+    shots = ShotRepository(database)
+    if shot.land_on_next_scene:
+        if not shots.is_last_in_scene(shot.still_image_id, shot.ordinal):
+            return (
+                "none",
+                "",
+                None,
+                "次のシーンの静止画を着地の絵にできるのは、シーンの最後のカットだけです。"
+                "このカットの指定を外してください",
+            )
+        still_images = StillImageRepository(database)
+        try:
+            next_id = still_images.next_scene_id(shot.still_image_id)
+        except StillImageNotFoundError:
+            return "none", "", None, "このカットの静止画が見つかりません"
+        if next_id is None:
+            return (
+                "none",
+                "",
+                None,
+                "次のシーンがありません。着地させる静止画を、このシーンの次に並べてください",
+            )
+        image = still_images.image_path(next_id)
+        if image is None or not image.is_file():
+            return (
+                "none",
+                "",
+                None,
+                "次のシーンの静止画がまだ合成されていません。先に合成してください",
+            )
+        return "next_scene", next_id, image, ""
+    custom = shots.custom_end_frame_path(shot.id)
+    if custom is not None and custom.is_file():
+        return "custom", shot.id, custom, ""
+    return "none", "", None, ""
 
 
 def shot_start_frame_source(database, shot) -> str:  # noqa: ANN001 - Database / ShotRead

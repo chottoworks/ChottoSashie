@@ -31,6 +31,10 @@ class ShotSpeakerError(ValueError):
     """セリフの話す人が、この静止画にいる人物ではない。"""
 
 
+class ShotEndFrameError(RuntimeError):
+    """着地の絵の指定が、今のカットでは成り立たない。"""
+
+
 # 生成に使う文のもとになる指示。構図は起点の絵を作るためのもので、文には入らない。
 PROMPT_SOURCE_FIELDS = {
     "motion_prompt",
@@ -56,7 +60,11 @@ def _now() -> str:
 
 def _with_readiness(database: Database, shot: ShotRead, row: Row) -> ShotRead:
     """「動画を生成できるか」と、できない理由を添える（UIはこれを表示するだけにする）。"""
-    from .readiness import resolve_shot_start_frame_version, shot_video_block_reason
+    from .readiness import (
+        resolve_shot_end_frame_version,
+        resolve_shot_start_frame_version,
+        shot_video_block_reason,
+    )
 
     reason = shot_video_block_reason(database, shot)
     lines = _speech_lines_for(database, shot.id)
@@ -77,12 +85,21 @@ def _with_readiness(database: Database, shot: ShotRead, row: Row) -> ShotRead:
         row["resolved_prompt_signature"] != prompt_signature(resolved)
     )
     start_frame_source, start_frame_version = resolve_shot_start_frame_version(database, shot)
+    end_frame_source, end_frame_version, end_frame_reason = resolve_shot_end_frame_version(
+        database, shot
+    )
     return resolved.model_copy(
         update={
             "can_generate_video": not reason,
             "video_blocked_reason": reason,
             "start_frame_source": start_frame_source,
             "start_frame_version": start_frame_version,
+            "is_last_in_scene": ShotRepository(database).is_last_in_scene(
+                shot.still_image_id, shot.ordinal
+            ),
+            "end_frame_source": end_frame_source,
+            "end_frame_version": end_frame_version,
+            "end_frame_blocked_reason": end_frame_reason,
             "has_prompt": bool(stored),
             "prompt_is_stale": stale,
             "prompt_edit_mode": edit_mode,
@@ -194,6 +211,7 @@ def _to_shot(row: Row) -> ShotRead:
         has_start_frame=_exists(row["start_frame_image_path"]),
         has_custom_start_frame=_exists(row["custom_start_frame_path"]),
         has_custom_end_frame=_exists(row["custom_end_frame_path"]),
+        land_on_next_scene=bool(row["land_on_next_scene"]),
         video_job_id=row["video_job_id"],
         has_video=_exists(row["output_video_path"]),
         video_format=_video_format(row["output_video_path"]),
@@ -476,12 +494,27 @@ class ShotRepository:
             "ambience_prompt",
             "music_prompt",
             "composition_prompt",
+            "land_on_next_scene",
             "timeline_mode",
             "note",
             "duration_seconds",
         }
         if not set(updates).issubset(allowed):
             raise ValueError("更新対象に許可されていない項目があります")
+        if updates.get("land_on_next_scene") is None:
+            updates.pop("land_on_next_scene", None)
+        elif updates["land_on_next_scene"]:
+            # 外すのはいつでもできる。指定できるのは、着地が1つに決まるときだけ。
+            if not current.is_last_in_scene:
+                raise ShotEndFrameError(
+                    "次のシーンの静止画を着地の絵にできるのは、シーンの最後のカットだけです"
+                )
+            if current.has_custom_end_frame:
+                raise ShotEndFrameError(
+                    "構図を変えて作った着地の絵があります。先に着地の絵を外してください"
+                )
+        if not updates:
+            return current
         # 文を直接書き直している間は、その文のもとになる指示を変えさせない
         # （変えても文へ反映されず、画面の指示と実際に送る文が食い違う）。
         if current.prompt_edit_mode and set(updates) & PROMPT_SOURCE_FIELDS:
@@ -730,6 +763,15 @@ class ShotRepository:
             ).fetchone()
         # 判定（`_with_readiness`）がこの関数を使うため、ここでは判定を足さない。
         return _to_shot(row) if row is not None else None
+
+    def is_last_in_scene(self, still_image_id: str, ordinal: int) -> bool:
+        """同じ静止画から作ったカットの中で、並びが最後か。"""
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM shots WHERE still_image_id = ? AND ordinal > ? LIMIT 1",
+                (still_image_id, ordinal),
+            ).fetchone()
+        return row is None
 
 
 class ShotBeatRepository:

@@ -246,6 +246,24 @@ class StillImageRepository:
             connection.execute("DELETE FROM still_images WHERE id = ?", (still_image_id,))
         return Path(image_file) if image_file else None
 
+    def next_scene_id(self, still_image_id: str) -> str | None:
+        """同じ作品で、並びが1つ後の静止画（次のシーン）のID。最後のシーンなら None。"""
+        with self.database.connect() as connection:
+            current = connection.execute(
+                "SELECT project_id, ordinal FROM still_images WHERE id = ?", (still_image_id,)
+            ).fetchone()
+            if current is None:
+                raise StillImageNotFoundError(still_image_id)
+            row = connection.execute(
+                """
+                SELECT id FROM still_images
+                WHERE project_id = ? AND ordinal > ?
+                ORDER BY ordinal LIMIT 1
+                """,
+                (current["project_id"], current["ordinal"]),
+            ).fetchone()
+        return row["id"] if row is not None else None
+
     def image_path(self, still_image_id: str) -> Path | None:
         with self.database.connect() as connection:
             row = connection.execute(

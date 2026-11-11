@@ -43,6 +43,10 @@ export function shotBeatVideoUrl(beatId: string): string {
 export function shotStartFrameUrl(shotId: string): string {
   return `${apiBaseUrl}/api/v1/shots/${shotId}/start-frame`;
 }
+/** このカットの着地の絵として実際に使う1枚（構図を変えて作った1枚か、次のシーンの静止画か）。 */
+export function shotEndFrameUrl(shotId: string): string {
+  return `${apiBaseUrl}/api/v1/shots/${shotId}/end-frame`;
+}
 /** 構図を変えて作った起点／終端フレーム。 */
 export function shotFrameUrl(shotId: string, target: ShotFrameTarget): string {
   return `${apiBaseUrl}/api/v1/shots/${shotId}/frame/${target}`;
@@ -61,6 +65,9 @@ export function stillImageSrc(stillImage: StillImage): string {
 }
 export function shotStartFrameSrc(shot: Shot): string {
   return withVersion(shotStartFrameUrl(shot.id), shot.start_frame_version);
+}
+export function shotEndFrameSrc(shot: Shot): string {
+  return withVersion(shotEndFrameUrl(shot.id), shot.end_frame_version);
 }
 export function shotVideoSrc(shot: Shot): string {
   return withVersion(shotVideoUrl(shot.id), shot.video_version);
@@ -442,6 +449,8 @@ export type TimelineMode = "single" | "split";
 export type ShotFrameTarget = "start" | "end";
 /** 起点フレームが実際にどこから来るか。 */
 export type StartFrameSource = "custom" | "previous" | "still_image" | "none";
+/** 着地の絵が実際にどこから来るか。 */
+export type EndFrameSource = "custom" | "next_scene" | "none";
 
 /** セリフ・ナレーションの1行。話す人は行ごとに決める。 */
 export interface ShotSpeechLine {
@@ -498,6 +507,16 @@ export interface Shot {
   start_frame_version: string;
   has_custom_start_frame: boolean;
   has_custom_end_frame: boolean;
+  /** 次のシーンの静止画を着地の絵にする指定。 */
+  land_on_next_scene: boolean;
+  /** このカットがシーンの最後か。次のシーンの静止画へ着地できるのは最後のカットだけ。 */
+  is_last_in_scene: boolean;
+  /** 着地の絵が実際にどこから来るか（着地を固定できるのは MiniMax H3 だけ）。 */
+  end_frame_source: EndFrameSource;
+  /** 着地の絵の画像URLに付ける版。絵が書き直されるか、出どころが変わると変わる。 */
+  end_frame_version: string;
+  /** 着地の指定があるのに、その絵を用意できない理由。空なら用意できている。 */
+  end_frame_blocked_reason: string;
   video_job_id: string | null;
   has_video: boolean;
   /** 動画URL（カットの動画とビートの区間動画）に付ける版。動画を書くたびに変わる。 */
@@ -1207,6 +1226,8 @@ export interface ShotFields {
   ambience_prompt?: string;
   music_prompt?: string;
   composition_prompt?: string;
+  /** 次のシーンの静止画を着地の絵にするか（カットを作るときは指定しない）。 */
+  land_on_next_scene?: boolean;
   timeline_mode?: TimelineMode;
   note?: string;
   duration_seconds?: number;

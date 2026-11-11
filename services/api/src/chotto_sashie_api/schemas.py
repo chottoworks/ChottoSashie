@@ -491,6 +491,8 @@ TimelineMode = Literal["single", "split"]
 # 起点フレームが実際にどこから来るか。押す前に画面へ出すために持つ
 # （黙って静止画へ戻る形にしない）。
 StartFrameSource = Literal["custom", "previous", "still_image", "none"]
+# 着地の絵の出どころ。custom=構図を変えて作った1枚 / next_scene=次のシーンの静止画。
+EndFrameSource = Literal["custom", "next_scene", "none"]
 
 
 class _ShotSpeechLineFields(BaseModel):
@@ -544,6 +546,8 @@ class ShotUpdate(BaseModel):
     ambience_prompt: str | None = Field(default=None, max_length=2000)
     music_prompt: str | None = Field(default=None, max_length=2000)
     composition_prompt: str | None = Field(default=None, max_length=2000)
+    # 次のシーンの静止画を着地の絵にするか。シーンの最後のカットだけが指定できる。
+    land_on_next_scene: bool | None = None
     timeline_mode: TimelineMode | None = None
     note: str | None = Field(default=None, max_length=2000)
     duration_seconds: float | None = Field(default=None, gt=0, le=30)
@@ -601,6 +605,16 @@ class ShotRead(BaseModel):
     # 構図変更で作った起点フレーム／終端フレームがあるか。
     has_custom_start_frame: bool = False
     has_custom_end_frame: bool = False
+    # 次のシーンの静止画を着地の絵にする指定。
+    land_on_next_scene: bool = False
+    # このカットがシーンの最後か（次のシーンの静止画へ着地できるのは最後のカットだけ）。
+    is_last_in_scene: bool = True
+    # 着地の絵が実際にどこから来るか。着地を固定できるのは MiniMax H3 だけ。
+    end_frame_source: EndFrameSource = "none"
+    # 着地の絵の画像URLに付ける版。絵が書き直されるか、出どころが変わると変わる。
+    end_frame_version: str = ""
+    # 着地の指定があるのに、その絵を用意できない理由。空なら用意できている（か、指定が無い）。
+    end_frame_blocked_reason: str = ""
     video_job_id: str | None
     has_video: bool
     # 動画URL（カットの動画とビートの区間動画）に付ける版。動画を書くたびに変わる。

@@ -4533,6 +4533,16 @@ function ShotCard({
   };
   const startFrameLabel = START_FRAME_LABELS[shot.start_frame_source];
   const startFrameUrl = api.shotStartFrameSrc(shot);
+  // 着地の絵も、どの1枚へ向かうのかを押す前に見せる。着地を固定できるのは音声付きの作り方だけ。
+  const END_FRAME_LABELS: Record<api.EndFrameSource, string> = {
+    custom: "構図を変えて作った1枚",
+    next_scene: "次のシーンの静止画",
+    none: "",
+  };
+  const endFrameLabel = END_FRAME_LABELS[shot.end_frame_source];
+  const endFrameUrl = api.shotEndFrameSrc(shot);
+  // 着地の指定があるのに絵を用意できないときは、着地なしの動画を作らせない。
+  const endFrameBlockedReason = audio ? shot.end_frame_blocked_reason : "";
   const videoUrl = api.shotVideoSrc(shot);
 
   return (
@@ -4615,6 +4625,18 @@ function ShotCard({
           >
             <img src={startFrameUrl} alt="このカットの起点" />
             <span className="vs-muted">起点：{startFrameLabel}</span>
+          </button>
+        )}
+        {audio && shot.end_frame_source !== "none" && (
+          <button
+            className="vs-still-image"
+            onClick={() => lightbox.open(
+              endFrameUrl,
+              `カット #${shot.ordinal} の着地の絵（${endFrameLabel}）`,
+            )}
+          >
+            <img src={endFrameUrl} alt="このカットの着地の絵" />
+            <span className="vs-muted">着地：{endFrameLabel}</span>
           </button>
         )}
         {shot.has_video ? (
@@ -4719,7 +4741,9 @@ function ShotCard({
             {audio && (
               <button
                 className="vs-btn ghost"
-                disabled={busy || !(fields.composition_prompt ?? "").trim()}
+                disabled={
+                  busy || shot.land_on_next_scene || !(fields.composition_prompt ?? "").trim()
+                }
                 onClick={() =>
                   void runner.run(
                     async () => {
@@ -4759,6 +4783,37 @@ function ShotCard({
             </div>
           )}
         </div>
+
+        {/* --- 次のシーンへの着地: 着地を固定できる作り方（音声付き）のときだけ出す --- */}
+        {audio && (
+          <div className="vs-field">
+            <label>次のシーンへの着地</label>
+            <label style={{ cursor: "pointer", display: "block" }}>
+              <input
+                type="checkbox"
+                checked={shot.land_on_next_scene}
+                // 外すのはいつでもできる。指定できるのは、着地の絵が1つに決まるときだけ。
+                disabled={
+                  busy ||
+                  (!shot.land_on_next_scene && (!shot.is_last_in_scene || shot.has_custom_end_frame))
+                }
+                onChange={(e) => save({ land_on_next_scene: e.target.checked })}
+              />{" "}
+              次のシーンの静止画を着地の絵にする
+            </label>
+            <div className="vs-muted">
+              このカットの動画を、次のシーンの静止画で終わるように作ります。次のシーンはその静止画から始まります。指定できるのは、シーンの最後のカットです。
+            </div>
+            {!shot.land_on_next_scene && shot.is_last_in_scene && shot.has_custom_end_frame && (
+              <div className="vs-muted">
+                構図を変えて作った着地の絵があるあいだは指定できません。先に「着地の絵を外す」を押してください。
+              </div>
+            )}
+            {shot.land_on_next_scene && shot.end_frame_blocked_reason && (
+              <div className="vs-warn vs-block-reason">{shot.end_frame_blocked_reason}</div>
+            )}
+          </div>
+        )}
 
         <div className="vs-field">
           <label>コメント</label>
@@ -5000,7 +5055,7 @@ function ShotCard({
         <button
           className="vs-btn"
           style={{ marginTop: 8 }}
-          disabled={busy || !shot.can_generate_video}
+          disabled={busy || !shot.can_generate_video || !!endFrameBlockedReason}
           onClick={() =>
             void runner.run(
               async () => {
@@ -5022,6 +5077,9 @@ function ShotCard({
         {/* 押せない理由は必ずボタンのそばに出す（押して409で気づく形にしない）。 */}
         {!shot.can_generate_video && (
           <div className="vs-warn vs-block-reason">{shot.video_blocked_reason}</div>
+        )}
+        {shot.can_generate_video && endFrameBlockedReason && (
+          <div className="vs-warn vs-block-reason">{endFrameBlockedReason}</div>
         )}
       </details>
 

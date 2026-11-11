@@ -260,6 +260,7 @@ from .still_images import StillImageNotFoundError, StillImageReferenceError, Sti
 from .shots import (
     ShotBeatNotFoundError,
     ShotBeatRepository,
+    ShotEndFrameError,
     ShotNotFoundError,
     ShotPromptLockedError,
     ShotRepository,
@@ -3286,7 +3287,7 @@ def update_shot(shot_id: str, request: ShotUpdate) -> ShotRead:
         return ShotRepository(database).update(shot_id, request)
     except ShotNotFoundError as error:
         raise HTTPException(status_code=404, detail="カットが見つかりません") from error
-    except ShotPromptLockedError as error:
+    except (ShotPromptLockedError, ShotEndFrameError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ShotSpeakerError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -3889,6 +3890,36 @@ def get_shot_start_frame(shot_id: str) -> Response:
     )
 
 
+@app.get("/api/v1/shots/{shot_id}/end-frame")
+def get_shot_end_frame(shot_id: str) -> Response:
+    """このカットの着地の絵として実際に使う1枚を返す。
+
+    構図を変えて作った1枚か、次のシーンの静止画か。生成と同じ解決から受け取る。
+    """
+    from .readiness import resolve_shot_end_frame
+
+    shots = ShotRepository(database)
+    try:
+        shot = shots.get(shot_id)
+    except ShotNotFoundError as error:
+        raise HTTPException(status_code=404, detail="カットが見つかりません") from error
+
+    source, image_path, reason = resolve_shot_end_frame(database, shot)
+    if image_path is None:
+        raise HTTPException(status_code=409, detail=reason or "着地の絵は指定されていません")
+    roots = {"custom": _SHOT_FRAME_ROOT, "next_scene": _STILL_IMAGE_ROOT}
+    try:
+        content, media_type = read_served_image(roots[source], image_path)
+    except ImageNotAvailableError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    # 起点と同じく「いまの解決結果」を返す。次のシーンの静止画を合成し直せば中身が変わる。
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "no-cache", "X-End-Frame-Source": source},
+    )
+
+
 def _shot_split_mode(shot: ShotRead) -> bool:
     """ビートごとに分けて作るか（区間が1つしか無ければ分ける意味がない）。"""
     return shot.timeline_mode == "split" and len(shot.beats) > 1
@@ -4182,9 +4213,14 @@ async def generate_shot_video(
             detail="起点となる画像がありません。先に静止画を合成してください",
         )
     # 終端キーフレームを扱えるのはMiniMax H3だけ（Wanのテンプレートに入力が無い）。
-    end_frame = shots.custom_end_frame_path(shot_id) if request.engine == "minimax_h3" else None
-    if end_frame is not None and not end_frame.is_file():
-        end_frame = None
+    end_frame: Path | None = None
+    if request.engine == "minimax_h3":
+        from .readiness import resolve_shot_end_frame
+
+        _end_source, end_frame, end_blocked_reason = resolve_shot_end_frame(database, shot)
+        # 着地の指定があるのに絵を用意できないときは、着地なしの動画を作らずに止める。
+        if end_blocked_reason:
+            raise HTTPException(status_code=409, detail=end_blocked_reason)
 
     split = _shot_split_mode(shot)
 
@@ -4489,6 +4525,12 @@ async def compose_shot_frame(
         raise HTTPException(
             status_code=409,
             detail="構図の変更内容を入力してください（例: バストアップにする、背後から見た構図にする）",
+        )
+    # 着地の絵は1つに決める。次のシーンの静止画へ着地する間は、別の着地の絵を作らせない。
+    if request.target is ShotFrameTarget.END and shot.land_on_next_scene:
+        raise HTTPException(
+            status_code=409,
+            detail="次のシーンの静止画を着地の絵にしています。先にその指定を外してください",
         )
 
     base_image = _shot_frame_base(shot)

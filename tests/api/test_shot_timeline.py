@@ -671,6 +671,172 @@ def test_wan_never_receives_an_end_frame(client: TestClient, fake_comfy: dict) -
     assert fake_comfy["workflows"][0]["10"]["class_type"] == "WanImageToVideo"
 
 
+# --- 5b. 次のシーンの静止画へ着地する ---
+
+
+def _next_scene(
+    client: TestClient, still_image_id: str, color: tuple[int, int, int] | None
+) -> str:
+    """同じ作品の末尾へ静止画（シーン）を足す。色を渡せば、その色の画像を合成済みにする。"""
+    project_id = client.get(f"/api/v1/still-images/{still_image_id}").json()["project_id"]
+    next_id = client.post(
+        f"/api/v1/projects/{project_id}/still-images", json={"name": "N"}
+    ).json()["id"]
+    if color is not None:
+        image_file = main._STILL_IMAGE_ROOT / f"{next_id}.png"
+        image_file.write_bytes(_png(color))
+        StillImageRepository(main.database).set_image(next_id, image_file, source_prompt="")
+    return next_id
+
+
+def _land_on_next_scene(client: TestClient, shot_id: str, enabled: bool = True):
+    return client.patch(f"/api/v1/shots/{shot_id}", json={"land_on_next_scene": enabled})
+
+
+def _end_upload(fake_comfy: dict) -> dict:
+    return next(item for item in fake_comfy["uploads"] if "-end" in item["filename"])
+
+
+def test_last_shot_lands_on_the_next_scenes_still_image(client: TestClient, fake_comfy: dict) -> None:
+    still_image_id = _still_image(client)
+    _next_scene(client, still_image_id, (200, 0, 0))
+    shot_id = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+
+    response = _land_on_next_scene(client, shot_id)
+
+    assert response.status_code == 200, response.text
+    shot = response.json()
+    assert shot["land_on_next_scene"] is True
+    assert shot["end_frame_source"] == "next_scene"
+    assert shot["end_frame_blocked_reason"] == ""
+    shown = client.get(f"/api/v1/shots/{shot_id}/end-frame")
+    assert shown.headers["X-End-Frame-Source"] == "next_scene"
+    assert _color_of(shown.content) == (200, 0, 0)
+
+    _generate(client, shot_id)
+    # 画面に出した1枚と同じ静止画が、動画の最後のコマの条件として渡る。
+    assert fake_comfy["workflows"][0]["7"]["inputs"]["last_frame"] == ["17", 0]
+    assert _color_of(_end_upload(fake_comfy)["data"]) == (200, 0, 0)
+
+
+def test_landing_follows_the_order_and_the_recomposition_of_the_scenes(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    """着地の絵は写しではなく、いま次に並んでいる静止画の、いまの画像。"""
+    still_image_id = _still_image(client)
+    second = _next_scene(client, still_image_id, (200, 0, 0))
+    third = _next_scene(client, still_image_id, (0, 200, 0))
+    shot_id = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+    before = _land_on_next_scene(client, shot_id).json()["end_frame_version"]
+
+    # 次のシーンを合成し直すと、画像URLの版が変わる。
+    image_file = main._STILL_IMAGE_ROOT / f"{second}.png"
+    image_file.write_bytes(_png((0, 0, 200)))
+    StillImageRepository(main.database).set_image(second, image_file, source_prompt="")
+    recomposed = client.get(f"/api/v1/shots/{shot_id}").json()["end_frame_version"]
+    assert recomposed != before
+    assert _color_of(client.get(f"/api/v1/shots/{shot_id}/end-frame").content) == (0, 0, 200)
+
+    # 並べ替えると、新しく次に来た静止画へ着地する。
+    project_id = client.get(f"/api/v1/still-images/{still_image_id}").json()["project_id"]
+    StillImageRepository(main.database).reorder(project_id, [still_image_id, third, second])
+    assert client.get(f"/api/v1/shots/{shot_id}").json()["end_frame_version"] != recomposed
+    _generate(client, shot_id)
+    assert _color_of(_end_upload(fake_comfy)["data"]) == (0, 200, 0)
+
+
+def test_landing_without_a_next_scene_stops_the_generation(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    """着地の指定があるのに絵が無いときは、着地なしの動画を黙って作らない。"""
+    still_image_id = _still_image(client)
+    shot_id = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+
+    shot = _land_on_next_scene(client, shot_id).json()
+    assert shot["end_frame_source"] == "none"
+    assert "次のシーンがありません" in shot["end_frame_blocked_reason"]
+
+    # 次のシーンがあっても、静止画が未合成なら着地できない。
+    _next_scene(client, still_image_id, None)
+    shot = client.get(f"/api/v1/shots/{shot_id}").json()
+    assert "まだ合成されていません" in shot["end_frame_blocked_reason"]
+
+    response = client.post(
+        f"/api/v1/shots/{shot_id}/generate-video",
+        json={"base_url": "http://127.0.0.1:8190", "engine": "minimax_h3"},
+    )
+    assert response.status_code == 409
+    assert "まだ合成されていません" in response.json()["detail"]
+    assert fake_comfy["submits"] == 0
+    assert client.get(f"/api/v1/shots/{shot_id}/end-frame").status_code == 409
+
+
+def test_only_the_last_shot_of_a_scene_can_land_on_the_next_scene(
+    client: TestClient, fake_comfy: dict
+) -> None:
+    still_image_id = _still_image(client)
+    _next_scene(client, still_image_id, (200, 0, 0))
+    shot1 = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+    assert _land_on_next_scene(client, shot1).status_code == 200
+
+    # 後ろにカットを足すと、最後ではなくなったカットは着地できない。指定は外せる。
+    shot2 = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+    first = client.get(f"/api/v1/shots/{shot1}").json()
+    assert first["is_last_in_scene"] is False
+    assert "最後のカットだけ" in first["end_frame_blocked_reason"]
+    response = client.post(
+        f"/api/v1/shots/{shot1}/generate-video",
+        json={"base_url": "http://127.0.0.1:8190", "engine": "minimax_h3"},
+    )
+    assert response.status_code == 409
+    cleared = _land_on_next_scene(client, shot1, False).json()
+    assert cleared["land_on_next_scene"] is False
+    assert cleared["end_frame_blocked_reason"] == ""
+
+    refused = _land_on_next_scene(client, shot1)
+    assert refused.status_code == 409
+    assert "最後のカットだけ" in refused.json()["detail"]
+    assert _land_on_next_scene(client, shot2).status_code == 200
+
+
+def test_landing_and_a_composed_end_frame_do_not_mix(client: TestClient, fake_comfy: dict) -> None:
+    """着地の絵は1つに決める。どちらが使われるのか分からない状態を作らせない。"""
+    still_image_id = _still_image(client)
+    _next_scene(client, still_image_id, (200, 0, 0))
+    shot_id = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+    end_frame = {
+        "base_url": "http://127.0.0.1:8190",
+        "target": "end",
+        "composition_prompt": "ドアの前で止まる",
+    }
+
+    assert client.post(f"/api/v1/shots/{shot_id}/frame", json=end_frame).status_code == 200
+    refused = _land_on_next_scene(client, shot_id)
+    assert refused.status_code == 409
+    assert "着地の絵を外して" in refused.json()["detail"]
+
+    assert client.delete(f"/api/v1/shots/{shot_id}/frame/end").status_code == 200
+    assert _land_on_next_scene(client, shot_id).status_code == 200
+    refused = client.post(f"/api/v1/shots/{shot_id}/frame", json=end_frame)
+    assert refused.status_code == 409
+    assert "指定を外して" in refused.json()["detail"]
+    # 起点の作り直しは、着地の指定と関係なくできる。
+    start_frame = {**end_frame, "target": "start"}
+    assert client.post(f"/api/v1/shots/{shot_id}/frame", json=start_frame).status_code == 200
+
+
+def test_wan_generates_without_the_landing(client: TestClient, fake_comfy: dict) -> None:
+    """Wan は着地の絵を受けないので、着地の指定があっても、絵が無くても生成できる。"""
+    still_image_id = _still_image(client)
+    shot_id = client.post(f"/api/v1/still-images/{still_image_id}/shots", json={}).json()["id"]
+    _land_on_next_scene(client, shot_id)
+
+    _generate(client, shot_id, engine="wan22")
+
+    assert fake_comfy["workflows"][0]["10"]["class_type"] == "WanImageToVideo"
+    assert not [item for item in fake_comfy["uploads"] if "-end" in item["filename"]]
+
+
 # --- 6. 生成に使う文は、用意できてから見せる ---
 
 

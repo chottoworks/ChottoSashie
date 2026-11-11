@@ -17,7 +17,7 @@ from .translation import TRANSLATION_TABLE_DDL
 
 # DBの形の版。下の SCHEMA は常に最新の形を書き、新しく作るDBはこの版から始まる。
 # 形を変えるときは版を1つ上げ、前の版のDBを追いつかせる手順を `_MIGRATIONS` に足す。
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -206,6 +206,9 @@ CREATE TABLE IF NOT EXISTS shots (
     custom_start_frame_path TEXT NOT NULL DEFAULT '',
     -- 終端の絵（MiniMax H3 の last_frame へ渡す）。着地の構図を固定したいときに使う。
     custom_end_frame_path TEXT NOT NULL DEFAULT '',
+    -- 終端の絵を、次のシーン（並びが次の静止画）の静止画にするか。絵は写さず、生成のときに
+    -- その静止画を参照する。シーンの最後のカットだけが使え、構図を変えた終端の絵とは併用しない。
+    land_on_next_scene INTEGER NOT NULL DEFAULT 0,
     -- ビートの実現方法。single=1回で生成 / split=ビートごとに区間を生成して繋ぐ。
     timeline_mode TEXT NOT NULL DEFAULT 'single',
     -- 用意できた「生成に使う文」（区間ごとの配列をJSONで持つ）。動画生成はこれを送る。
@@ -390,6 +393,13 @@ def _add_scene_transitions(connection: sqlite3.Connection) -> None:
         connection.execute(f"ALTER TABLE still_images ADD COLUMN {definition}")
 
 
+def _add_land_on_next_scene(connection: sqlite3.Connection) -> None:
+    """カットに、次のシーンの静止画へ着地する指定の列を足す。前の版のカットは指定なし。"""
+    connection.execute(
+        "ALTER TABLE shots ADD COLUMN land_on_next_scene INTEGER NOT NULL DEFAULT 0"
+    )
+
+
 # 版ごとの移行手順。キーの版へ上げるために、1つ前の版のDBへ行う変更。
 _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _add_portrait_crop,
@@ -398,6 +408,7 @@ _MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
     5: _add_placed_composition,
     6: _add_composition_prompts,
     7: _add_scene_transitions,
+    8: _add_land_on_next_scene,
 }
 
 
