@@ -6172,7 +6172,7 @@ export function App() {
                   className="vs-input"
                   value={style}
                   onChange={(e) => setStyle(e.target.value)}
-                  placeholder="例: 落ち着いた色合い、やわらかな光、繊細な描き込み"
+                  placeholder="例: 落ち着いた色合いのイラスト、やわらかな光、繊細な描き込み"
                 />
               </div>
               <div className="vs-row vs-project-actions">

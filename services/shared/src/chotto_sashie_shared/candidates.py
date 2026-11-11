@@ -90,6 +90,11 @@ def _identity_clause(character: CharacterRead, project_style: str) -> str:
 
     生成モデルは前方のトークンを強く反映するため、変えてはいけない造作ほど
     前に置く。作品画風は識別条件ではないので末尾へ回す。
+
+    作品画風の見出しは、描かれ方（イラストか写真か）を言わない語にする。見出しが
+    「illustration style」だと、画風に「実写、フォトリアリスティック」と書いても
+    見出しと食い違い、同じ回の候補にイラスト調と写真調が混ざる。描かれ方は利用者の
+    書いた画風だけに決めさせる。
     """
     traits = "、".join(character.immutable_features)
     parts = [
@@ -110,7 +115,7 @@ def _identity_clause(character: CharacterRead, project_style: str) -> str:
         f"accessories: {character.accessories}" if character.accessories else "",
         f"impression: {character.personality}" if character.personality else "",
         (
-            "illustration style shared by every character in the work: "
+            "visual style shared by every character in the work: "
             f"{project_style}"
             if project_style
             else ""

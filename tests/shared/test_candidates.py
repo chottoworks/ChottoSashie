@@ -51,14 +51,30 @@ def test_candidate_prompts_use_structured_profile(tmp_path: Path) -> None:
     assert all("keep the defined face exactly" in prompt for prompt in prompts)
     assert "explore a distinct facial geometry" not in prompts[0]
     # 顔立ちは冒頭付近に置き、反映を強める。
-    assert prompts[0].index("DEFINING FACE") < prompts[0].index("illustration style shared")
-    assert "illustration style shared by every character" in prompts[0]
+    assert prompts[0].index("DEFINING FACE") < prompts[0].index("visual style shared")
+    assert "visual style shared by every character" in prompts[0]
     assert "淡い水彩、低彩度の小説挿絵" in prompts[0]
     assert "character-specific nuance" in prompts[0]
     assert "hair color: 濃紺" in prompts[0]
     assert "eye color: 琥珀色" in prompts[0]
     assert "左目の下の小さなほくろ" in prompts[0]
     assert "one person only" in prompts[0]
+
+
+def test_candidate_prompts_leave_the_medium_to_the_project_style(tmp_path: Path) -> None:
+    """描かれ方は作品の画風だけが決める。定型句の側でイラストと言わない。
+
+    見出しなどの定型句に illustration とあると、実写の画風を指定した作品でも
+    候補にイラスト調が混ざる。
+    """
+    _database, character = make_character(tmp_path)
+
+    prompts = build_character_candidate_prompts(
+        character, 12, project_style="実写、フォトリアリスティック"
+    )
+
+    assert all("実写、フォトリアリスティック" in prompt for prompt in prompts)
+    assert not any("illustration" in prompt.lower() for prompt in prompts)
 
 
 def test_candidate_prompts_explore_geometry_when_face_unspecified(tmp_path: Path) -> None:
