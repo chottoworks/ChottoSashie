@@ -80,6 +80,28 @@ FACE_RENDER_VARIANTS = [
 ]
 
 
+# 写る範囲はバストアップに揃える。候補は顔を見比べて選ぶものなので、顔が見切れても、
+# 腰から下まで写って顔が小さくなっても比べにくい。
+#
+# 構図は冒頭と文末の2か所で言う。文の後半は顔立ちの指定・候補ごとの顔の差分・顔の細部と
+# 顔の話が続くので、冒頭で言うだけではモデルが顔へ寄り、髪や額が画面から切れる。逆に衣装
+# （スカートなど）や体格の記述はカメラを引かせ、腰から下まで写る。文末でもう一度構図を
+# 言い切ると、どちらにも引きずられにくい（同じ種で比べて決めた形）。
+FRAMING_OPENING = (
+    "front-facing bust-up portrait framed from the chest up, "
+    "the whole head and all of the hair inside the frame with a little empty space above the head, "
+    "shoulders and upper chest visible, "
+)
+# 下3分の1を埋めるものは、体の部位ではなく衣装として言う。「肩と胸が見える」とだけ言うと、
+# 衣装が消えて素肌の肩や胸が描かれる。構図の言い方を全身寄りの語（half-length、medium shot）に
+# すると、人物によって全身や小さな人影になる。
+FRAMING_CLOSING = (
+    "Composition: bust-up portrait from the chest up, the camera far enough that the top of the hair "
+    "is fully inside the frame with empty background above it, and the outfit on the shoulders and chest "
+    "fills the lower third."
+)
+
+
 def build_identity_clause(character: CharacterRead, project_style: str = "") -> str:
     """人物の識別条件をまとめた説明文を返す（バンドル書き出しなどからも使う公開版）。"""
     return _identity_clause(character, project_style)
@@ -140,6 +162,9 @@ def build_character_candidate_prompts(
 
     顔立ちを先頭へ置いて反映を強め、候補ごとの差分は顔指定の有無で切り替える。
     顔が指定済みなら造作は動かさず描写だけを変え、未指定なら造作そのものを探索する。
+
+    並びは「構図 → 人物の条件 → 顔の差分 → 構図」。人物の条件の中の順序は変えない。
+    顔の話を前半へ集めて衣装と小物を後ろへ回すと、眼鏡などの小物や衣装が描かれなくなる。
     """
     identity = _identity_clause(character, project_style)
     face_is_defined = bool(character.face)
@@ -154,14 +179,15 @@ def build_character_candidate_prompts(
             )
         prompts.append(
             "single character, solo, one person only, "
-            "front-facing bust portrait, head and shoulders, neutral expression, "
+            f"{FRAMING_OPENING}neutral expression, "
             "looking at viewer, identical camera and framing, plain soft background. "
             f"{identity}. "
             f"{variation}. "
             "render a recognizably individual face with the exact geometry described above, "
             "not a generic or average idol face; preserve every specified and locked trait. "
             "detailed face, detailed eyes, consistent anatomy, clean silhouette, "
-            "no text, no watermark."
+            "no text, no watermark. "
+            f"{FRAMING_CLOSING}"
         )
     return prompts
 

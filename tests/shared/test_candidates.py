@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 
 from chotto_sashie_shared.candidates import (
+    FRAMING_CLOSING,
+    FRAMING_OPENING,
     CandidateRepository,
     CandidateSelectionError,
     build_character_candidate_prompts,
@@ -44,7 +46,7 @@ def test_candidate_prompts_use_structured_profile(tmp_path: Path) -> None:
 
     assert len(prompts) == 8
     assert len(set(prompts)) == 8
-    assert all("front-facing bust portrait" in prompt for prompt in prompts)
+    assert all("front-facing bust-up portrait" in prompt for prompt in prompts)
     # 顔立ちが指定済みなので、造作を上書きしない描写差分を使う。
     assert "DEFINING FACE" in prompts[0]
     assert "面長で頬骨が高く、太い直線眉、細い鼻、薄い口" in prompts[0]
@@ -75,6 +77,28 @@ def test_candidate_prompts_leave_the_medium_to_the_project_style(tmp_path: Path)
 
     assert all("実写、フォトリアリスティック" in prompt for prompt in prompts)
     assert not any("illustration" in prompt.lower() for prompt in prompts)
+
+
+def test_candidate_prompts_state_the_framing_first_and_last(tmp_path: Path) -> None:
+    """構図は冒頭と文末の両方で言う。
+
+    後半は顔の話が続くので、冒頭だけだと顔へ寄って髪や額が切れ、衣装や体格の記述には
+    引かれて腰から下まで写る。文末で言い直すと、写る範囲がバストアップに揃いやすい。
+    """
+    _database, character = make_character(tmp_path)
+
+    prompts = build_character_candidate_prompts(character, 12, project_style="淡い水彩")
+
+    for prompt in prompts:
+        opening = prompt.index(FRAMING_OPENING)
+        assert opening < prompt.index("DEFINING FACE")
+        assert prompt.endswith(FRAMING_CLOSING)
+        # 顔の差分と顔の細部よりも後ろで言う。
+        assert prompt.index("detailed face") < prompt.rindex(FRAMING_CLOSING)
+        # 人物の条件の並びは保つ（小物を後ろへ回すと描かれなくなる）。
+        assert prompt.index("hair color:") < prompt.index("must keep exactly:")
+    # 下を埋めるものは衣装として言う（体の部位だけを言うと素肌が描かれる）。
+    assert "the outfit on the shoulders and chest" in FRAMING_CLOSING
 
 
 def test_candidate_prompts_explore_geometry_when_face_unspecified(tmp_path: Path) -> None:
